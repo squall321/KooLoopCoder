@@ -339,3 +339,6 @@
 - 2026-05-05 CLI 신규: `loopcoder serve` (FastAPI/uvicorn), `loopcoder mcp serve` (stdio/sse).
 - 2026-05-05 **VS Code 확장** `vscode-extension/`: TS 4 모듈(api/sessionsTreeView/toolsTreeView/extension), package.json(7 commands + 2 views + 3 settings), README. tsc 0 에러 컴파일.
 - 2026-05-05 최종: **123/123 단위테스트** + 라이브 API 검증 + MCP 빌드 검증 + TS 컴파일 OK.
+- 2026-05-06 HANDOFF.md 작성 (15절, 457줄) — 새 AI/엔지니어를 위한 단일 onboarding 문서.
+- 2026-05-06 PLAN/PROGRESS/HANDOFF.md를 LoopCoder/ 루트로 이동 (repo 단일화). HANDOFF의 상대경로 보정. .gitignore에 node_modules/, dist/, *.vsix 추가.
+- 2026-05-06 **GitHub 푸시 완료**: `git@github.com:squall321/KooLoopCoder.git`, main 브랜치, 135 파일 / 13,477 lines, commit `f83fee8`. https://github.com/squall321/KooLoopCoder
