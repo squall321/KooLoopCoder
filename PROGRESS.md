@@ -342,3 +342,13 @@
 - 2026-05-06 HANDOFF.md 작성 (15절, 457줄) — 새 AI/엔지니어를 위한 단일 onboarding 문서.
 - 2026-05-06 PLAN/PROGRESS/HANDOFF.md를 LoopCoder/ 루트로 이동 (repo 단일화). HANDOFF의 상대경로 보정. .gitignore에 node_modules/, dist/, *.vsix 추가.
 - 2026-05-06 **GitHub 푸시 완료**: `git@github.com:squall321/KooLoopCoder.git`, main 브랜치, 135 파일 / 13,477 lines, commit `f83fee8`. https://github.com/squall321/KooLoopCoder
+- 2026-05-06 LICENSE (MIT) + CHANGELOG.md (0.1.0 release notes) + .github/workflows/test.yml (pytest+coverage / shell syntax / TS compile, 3 jobs).
+- 2026-05-06 logsetup 통합: controller / verifier / llm.client / tools.registry — 핵심 4개 모듈에서 `get_logger(__name__)` 사용.
+- 2026-05-06 워크스페이스 fixtures 추가: `examples/workspaces/refactor_calculator/` (200줄 monolithic + 6 pytest, 모두 PASS), `examples/workspaces/fastapi_hello/` (conftest + requirements).
+- 2026-05-06 **Mock-LLM E2E 시나리오 4종 작성 + 통과** (`agent/tests/e2e_mock/`, 6 tests):
+  - E2E-4 max_iter 도달시 깔끔한 fail (status=failed, iterations==max_iter, 워크스페이스 변동 없음)
+  - E2E-5 거짓 submit_goal 차단 (3회 lying → 모두 fail) + 진짜 작업시 통과 (lie/lie/truth → iter 3 PASS)
+  - E2E-6 rollback 시 git tag 보존 + 첫 골 통과 후 두번째 골이 rollback_after=3 도달
+  - E2E-7 verify_log SQLite 영속성 + ContextBuilder 우선순위 정적 검증 (verify_log < attempt 보장)
+- 2026-05-06 ruff 통과: 19개 위반 모두 수정 (4개 자동, 15개 import 순서 정리). 0 errors.
+- 2026-05-06 **최종 테스트 매트릭스: 129/129 PASS** (단위 123 + mock-E2E 6).

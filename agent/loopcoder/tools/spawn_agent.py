@@ -13,7 +13,7 @@ typically by ``LoopController``. Tests can supply a mock factory.
 
 from __future__ import annotations
 
-from typing import Any, Callable, ClassVar
+from typing import Callable, ClassVar
 
 from pydantic import BaseModel, Field
 

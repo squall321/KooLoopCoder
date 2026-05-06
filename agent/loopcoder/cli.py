@@ -56,7 +56,7 @@ def run(plan_path: str, goal_id: str | None, resume: bool, config_path: str | No
     log.info("plan loaded", extra={"goals": len(plan.goals), "project": plan.project.name})
 
     if dry_run:
-        click.echo(f"# Dry-run: validating plan + running acceptance checks (no LLM)")
+        click.echo("# Dry-run: validating plan + running acceptance checks (no LLM)")
         verifier = Verifier(plan.project.workspace, sandbox=None)
         ordered = topological_order(plan)
         if goal_id:

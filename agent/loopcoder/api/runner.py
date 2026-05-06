@@ -102,7 +102,7 @@ def start_session(
         finally:
             registry_runners.remove(controller.session_id or placeholder_id)
 
-    th = threading.Thread(target=_run, daemon=True, name=f"loopcoder-runner")
+    th = threading.Thread(target=_run, daemon=True, name="loopcoder-runner")
     th.start()
 
     # Wait briefly for session_id to be assigned by controller.run()

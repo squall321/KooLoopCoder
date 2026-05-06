@@ -51,7 +51,7 @@ _RULES = [
 
 def build_reminder(state: ReminderState) -> ContextSection:
     parts: list[str] = []
-    parts.append(f"<state>")
+    parts.append("<state>")
     parts.append(f"  goal: {state.goal_id}  iter: {state.iteration}" + (f"/{state.max_iter}" if state.max_iter else ""))
     parts.append(f"  acceptance checks: {state.acceptance_count}")
     if state.consecutive_failures > 0:

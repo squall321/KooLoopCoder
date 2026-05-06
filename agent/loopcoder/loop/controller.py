@@ -23,9 +23,6 @@ from typing import Any
 from loopcoder.config import LoopCoderConfig
 from loopcoder.events import Event, EventBus
 from loopcoder.llm.client import LlmClient
-from loopcoder.logsetup import get_logger
-
-log = get_logger("loopcoder.loop")
 from loopcoder.llm.context import ContextBuilder, ContextSection
 from loopcoder.llm.prompts import (
     FAILURE_FEEDBACK_PROMPT,
@@ -37,6 +34,7 @@ from loopcoder.llm.prompts import (
     render,
 )
 from loopcoder.llm.tokens import TokenCounter
+from loopcoder.logsetup import get_logger
 from loopcoder.loop.conventions import load_conventions
 from loopcoder.loop.reminders import ReminderState, build_reminder
 from loopcoder.loop.strategy import decide as decide_strategy
@@ -49,6 +47,8 @@ from loopcoder.tools.base import ToolContext
 from loopcoder.tools.registry import ToolRegistry, default_registry
 from loopcoder.tools.shell import BackgroundJobManager
 from loopcoder.tools.todo import TodoList
+
+log = get_logger("loopcoder.loop")
 
 
 INITIAL_TAG_NAME = "initial"
