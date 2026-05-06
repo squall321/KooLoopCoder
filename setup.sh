@@ -30,6 +30,10 @@ MODEL_CACHE="${MODEL_CACHE:-/scratch/models}"
 LOG_DIR="${LOG_DIR:-/var/log/loopcoder}"
 STATE_DIR="${STATE_DIR:-/var/lib/loopcoder}"
 ETC_DIR="${ETC_DIR:-/etc/loopcoder}"
+WORKSPACES_DIR="${WORKSPACES_DIR:-/scratch/workspaces}"
+SIF_STORE_DIR="${SIF_STORE_DIR:-/opt/apptainers}"
+SIF_CURRENT_DIR="${SIF_CURRENT_DIR:-/opt/apptainers/current}"
+export SIF_STORE_DIR SIF_CURRENT_DIR WORKSPACES_DIR
 
 LOOPCODER_USER="${LOOPCODER_USER:-loopcoder}"
 LOOPCODER_GROUP="${LOOPCODER_GROUP:-loopcoder}"
@@ -233,23 +237,42 @@ stage_7_model_stage() {
     note "model staged at $dst"
 }
 
-# Stage 8 — vllm_image (place .sif in install_root, smoke import)
+# Stage 8 — vllm_image / sandbox / suite — install into /opt/apptainers/
+# Versioned filenames + current/ symlink layout (atomic upgrades).
 stage_8_vllm_image() {
-    local sif_dir="$INSTALL_ROOT/containers"
-    mkdir -p "$sif_dir"
-    if [[ -f "$BUNDLE_ROOT/containers/vllm.sif" ]]; then
-        run "cp -u '$BUNDLE_ROOT/containers/vllm.sif' '$sif_dir/vllm.sif'"
-    elif [[ ! -f "$sif_dir/vllm.sif" ]]; then
-        fail "vllm.sif not in bundle and not previously staged"
-    fi
-    if [[ -f "$BUNDLE_ROOT/containers/loopcoder-sandbox.sif" ]]; then
-        run "cp -u '$BUNDLE_ROOT/containers/loopcoder-sandbox.sif' '$sif_dir/loopcoder-sandbox.sif'"
-    fi
+    local store="${SIF_STORE_DIR:-/opt/apptainers}"
+    local current="${SIF_CURRENT_DIR:-${store}/current}"
+    mkdir -p "$store" "$current"
+    chmod 755 "$store" "$current"
+
+    install_sif() {
+        local src="$1" stable="$2"
+        [[ -f "$src" ]] || { note "skip (missing): $src"; return 0; }
+        # Versioned filename = the source file's basename, untouched.
+        local base; base="$(basename "$src")"
+        run "cp -u '$src' '$store/$base'"
+        run "chmod 644 '$store/$base'"
+        # Atomic symlink to "stable" name systemd points at
+        run "ln -sfn '$base' '$current/$stable'"
+        note "installed $base -> $current/$stable"
+    }
+
+    install_sif "$BUNDLE_ROOT/containers/vllm.sif"               vllm.sif
+    install_sif "$BUNDLE_ROOT/containers/loopcoder-sandbox.sif"  loopcoder-sandbox.sif
+    install_sif "$BUNDLE_ROOT/containers/loopcoder-suite.sif"    loopcoder-suite.sif
+
+    [[ -e "$current/vllm.sif" ]] || fail "vllm.sif not staged in $current/"
+
     if [[ $SKIP_GPU -eq 0 ]]; then
-        run "apptainer exec --nv '$sif_dir/vllm.sif' python -c 'import vllm; print(vllm.__version__)'"
+        run "apptainer exec --nv '$current/vllm.sif' python -c 'import vllm; print(vllm.__version__)'"
     else
-        run "apptainer exec '$sif_dir/vllm.sif' python -c 'import vllm; print(vllm.__version__)'" \
+        run "apptainer exec '$current/vllm.sif' python -c 'import vllm; print(vllm.__version__)'" \
             || note "vllm sif import attempted (CPU-only test)"
+    fi
+
+    # Suite import smoke (CPU only; doesn't need GPU)
+    if [[ -e "$current/loopcoder-suite.sif" ]]; then
+        run "apptainer exec '$current/loopcoder-suite.sif' loopcoder --version"
     fi
 }
 
@@ -282,16 +305,38 @@ stage_9_systemd_unit() {
     local model_dir
     model_dir="$(awk -F': *' '/^  destination_path:/{print $2; exit}' "$INSTALL_YAML" | tr -d '\"')"
 
+    local current="${SIF_CURRENT_DIR:-/opt/apptainers/current}"
     sed -e "s#@MODEL_DIR@#$model_dir#g" \
         -e "s#@USER@#$LOOPCODER_USER#g" \
         -e "s#@GROUP@#$LOOPCODER_GROUP#g" \
         -e "s#@ETC_DIR@#$ETC_DIR#g" \
         -e "s#@CACHE_DIR@#$INSTALL_ROOT/cache#g" \
-        -e "s#@VLLM_SIF@#$INSTALL_ROOT/containers/vllm.sif#g" \
+        -e "s#@VLLM_SIF@#$current/vllm.sif#g" \
         -e "s#@LOG_DIR@#$LOG_DIR#g" \
         -e "s#@SYSTEMD_RESTART@#on-failure#g" \
         -e "s#@SYSTEMD_RESTART_SEC@#15#g" \
         "$tmpl" > /etc/systemd/system/vllm.service
+
+    # Render loopcoder.service template (suite SIF) — optional but
+    # standard in the new architecture.
+    local suite_tmpl="${SOURCE_DIR:-$BUNDLE_ROOT/source/LoopCoder}/systemd/loopcoder.service.template"
+    [[ -f "$suite_tmpl" ]] || suite_tmpl="$(dirname "$0")/systemd/loopcoder.service.template"
+    if [[ -f "$suite_tmpl" && -e "$current/loopcoder-suite.sif" ]]; then
+        sed -e "s#@USER@#$LOOPCODER_USER#g" \
+            -e "s#@GROUP@#$LOOPCODER_GROUP#g" \
+            -e "s#@ETC_DIR@#$ETC_DIR#g" \
+            -e "s#@LOG_DIR@#$LOG_DIR#g" \
+            -e "s#@STATE_DIR@#$STATE_DIR#g" \
+            -e "s#@WORKSPACES_DIR@#${WORKSPACES_DIR:-/scratch/workspaces}#g" \
+            -e "s#@SUITE_SIF@#$current/loopcoder-suite.sif#g" \
+            -e "s#@SANDBOX_SIF@#$current/loopcoder-sandbox.sif#g" \
+            -e "s#@SYSTEMD_RESTART@#on-failure#g" \
+            -e "s#@SYSTEMD_RESTART_SEC@#10#g" \
+            "$suite_tmpl" > /etc/systemd/system/loopcoder.service
+        note "rendered /etc/systemd/system/loopcoder.service"
+    else
+        note "loopcoder-suite.sif absent; skipping loopcoder.service"
+    fi
 
     # Ensure system user exists
     if ! id "$LOOPCODER_USER" >/dev/null 2>&1; then
@@ -302,6 +347,9 @@ stage_9_systemd_unit() {
 
     run "systemctl daemon-reload"
     run "systemctl enable vllm"
+    if [[ -f /etc/systemd/system/loopcoder.service ]]; then
+        run "systemctl enable loopcoder"
+    fi
 }
 
 # Stage 10 — start_vllm

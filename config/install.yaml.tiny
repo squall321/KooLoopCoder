@@ -22,8 +22,11 @@ model:
     verify_sha256: true
 
 container:
-  vllm_image: /models/containers/vllm.sif
-  sandbox_image: /scratch/loopcoder/containers/loopcoder-sandbox.sif
+  store_dir: /opt/apptainers
+  current_dir: /opt/apptainers/current
+  vllm_image: /opt/apptainers/current/vllm.sif
+  sandbox_image: /opt/apptainers/current/loopcoder-sandbox.sif
+  suite_image: /opt/apptainers/current/loopcoder-suite.sif
 
 system:
   user: loopcoder

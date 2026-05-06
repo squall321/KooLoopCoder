@@ -41,10 +41,16 @@ VENV_PY="$PROJECT_ROOT/.venv/bin/python"
 VENV_PIP="$PROJECT_ROOT/.venv/bin/pip"
 LOOPCODER="$PROJECT_ROOT/.venv/bin/loopcoder"
 
-# 1) install vllm + huggingface_hub if absent
-if ! "$VENV_PY" -c 'import vllm' 2>/dev/null; then
-    echo "[tiny-e2e] installing vllm into venv (this can take 5-10 min)…"
-    "$VENV_PIP" install --quiet "vllm" "huggingface_hub[hf_transfer]"
+# Two backends. Default: SIF (offline-first, matches B300). Fallback: pip
+# vllm into the venv (requires internet, sometimes faster on a dev box
+# that already has wheels cached).
+VLLM_BACKEND="${VLLM_BACKEND:-sif}"           # sif | pip
+VLLM_SIF_PATH="${VLLM_SIF_PATH:-/opt/apptainers/current/vllm.sif}"
+
+# 1) Ensure huggingface_hub is available so we can fetch the tiny model.
+if ! "$VENV_PY" -c 'import huggingface_hub' 2>/dev/null; then
+    echo "[tiny-e2e] installing huggingface_hub + hf_transfer into venv"
+    "$VENV_PIP" install --quiet "huggingface_hub" "hf_transfer"
 fi
 
 # 2) download tiny model into LoopCoder/output/tiny-test/models/
@@ -58,11 +64,48 @@ if [[ ! -f "$MODEL_DIR/config.json" ]]; then
         --resume-download
 fi
 
-# 3) start vllm in background (host mode, single GPU, no Apptainer)
+# 2b) If SIF backend selected and vLLM not installed in venv, ensure SIF exists
+if [[ "$VLLM_BACKEND" == "sif" ]]; then
+    if [[ ! -f "$VLLM_SIF_PATH" ]]; then
+        echo "[tiny-e2e] WARN: VLLM_BACKEND=sif but $VLLM_SIF_PATH does not exist."
+        echo "          Either build it with bundle/in_vm/collect_vllm_image.sh"
+        echo "          or rerun this script with VLLM_BACKEND=pip."
+        if "$VENV_PY" -c 'import vllm' 2>/dev/null; then
+            echo "[tiny-e2e] vllm IS installed in venv; falling back to pip backend."
+            VLLM_BACKEND=pip
+        else
+            exit 4
+        fi
+    fi
+fi
+
+# 2c) pip backend: install vllm if absent (requires internet)
+if [[ "$VLLM_BACKEND" == "pip" ]] && ! "$VENV_PY" -c 'import vllm' 2>/dev/null; then
+    echo "[tiny-e2e] installing vllm into venv (5-10 min, requires internet)…"
+    "$VENV_PIP" install --quiet "vllm"
+fi
+
+# 3) start vllm in background
 if [[ -f "$PIDFILE" ]] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
     echo "[tiny-e2e] vllm already running (pid $(cat "$PIDFILE"))"
+elif [[ "$VLLM_BACKEND" == "sif" ]]; then
+    echo "[tiny-e2e] starting vllm via apptainer SIF on :$VLLM_PORT"
+    nohup apptainer run --nv \
+        --bind "$MODEL_DIR:/model:ro" \
+        "$VLLM_SIF_PATH" \
+        /opt/vllm/bin/vllm serve /model \
+            --served-model-name "$MODEL_ID" \
+            --host 127.0.0.1 \
+            --port "$VLLM_PORT" \
+            --max-model-len 8192 \
+            --gpu-memory-utilization 0.5 \
+            --enable-prefix-caching \
+        > "$LOG_DIR/vllm.log" 2>&1 &
+    echo $! > "$PIDFILE"
+    sleep 1
+    echo "  pid=$(cat "$PIDFILE"), log=$LOG_DIR/vllm.log"
 else
-    echo "[tiny-e2e] starting vllm on :$VLLM_PORT"
+    echo "[tiny-e2e] starting vllm via pip-installed venv on :$VLLM_PORT"
     nohup "$VENV_PY" -m vllm.entrypoints.openai.api_server \
         --model "$MODEL_DIR" \
         --served-model-name "$MODEL_ID" \

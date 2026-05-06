@@ -21,9 +21,12 @@ VM_DISK_ROOT="${VM_DISK_ROOT:-${SCRIPT_DIR}/output/vm-disks}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-${SCRIPT_DIR}/output/bundle}"
 VM_NAME="${VM_NAME:-loopcoder-bundle-vm}"
 VM_USER="${VM_USER:-loopcoder}"
-TINY_MODEL=0   # --tiny-model flag
+TINY_MODEL=0    # --tiny-model flag
+# Model is NOT bundled by default. Per project policy it lives permanently on
+# the GPU host's /scratch/models/ and is shipped once. Use --include-model to
+# include the model weights in the bundle (rare).
 SKIP_VM_CREATE=0
-SKIP_MODEL=0
+SKIP_MODEL=1
 SKIP_CONTAINER=0
 SKIP_WHEELS=0
 SKIP_APT=0
@@ -39,6 +42,7 @@ while [[ $# -gt 0 ]]; do
         --vm-name) VM_NAME="$2"; shift 2 ;;
         --skip-vm-create) SKIP_VM_CREATE=1; shift ;;
         --skip-model) SKIP_MODEL=1; shift ;;
+        --include-model) SKIP_MODEL=0; shift ;;
         --skip-container) SKIP_CONTAINER=1; shift ;;
         --skip-wheels) SKIP_WHEELS=1; shift ;;
         --skip-apt) SKIP_APT=1; shift ;;
@@ -137,6 +141,7 @@ fi
 if [[ $SKIP_CONTAINER -eq 0 ]]; then
     run_remote "collect_vllm_image" "bash /home/$VM_USER/in_vm/collect_vllm_image.sh /output/containers /home/$VM_USER/loopcoder-src/containers"
     run_remote "collect_sandbox_image" "bash /home/$VM_USER/in_vm/collect_sandbox_image.sh /output/containers /home/$VM_USER/loopcoder-src/containers"
+    run_remote "collect_loopcoder_suite" "bash /home/$VM_USER/in_vm/collect_loopcoder_suite.sh /output/containers /home/$VM_USER/loopcoder-src"
 fi
 if [[ $SKIP_MODEL -eq 0 ]]; then
     if [[ $TINY_MODEL -eq 1 ]]; then

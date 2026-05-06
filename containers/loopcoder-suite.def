@@ -1,0 +1,104 @@
+Bootstrap: docker
+From: python:3.12-slim-bookworm
+
+# LoopCoder Suite container.
+#
+# Holds the agent + HTTP API + MCP server. The user's IDE (VS Code,
+# Cursor, Windsurf) connects via Remote-SSH and the LoopCoder VS Code
+# extension. No GUI / code-server is bundled — Remote-SSH covers that.
+#
+# Build inside the Bundle VM (Ubuntu 24.04 + internet):
+#   sudo apptainer build loopcoder-suite.sif containers/loopcoder-suite.def
+#
+# Runtime entrypoint:
+#   apptainer run loopcoder-suite.sif        # default: serve API + MCP
+#   apptainer run --app api loopcoder-suite.sif    # API only
+#   apptainer run --app mcp loopcoder-suite.sif    # MCP stdio only
+#   apptainer exec loopcoder-suite.sif loopcoder run --plan ...
+#
+# Required host bind mounts at runtime:
+#   /scratch/workspaces  → /workspaces  (rw)
+#   /var/lib/loopcoder   → /state       (rw, SQLite + git snapshots)
+#   /var/log/loopcoder   → /var/log/loopcoder  (rw)
+#   /etc/loopcoder       → /etc/loopcoder (ro, the three YAMLs)
+
+%files
+    pyproject.toml /opt/loopcoder-src/pyproject.toml
+    README.md /opt/loopcoder-src/README.md
+    LICENSE /opt/loopcoder-src/LICENSE
+    agent/ /opt/loopcoder-src/agent
+    # If `wheels/` is staged before build (collect_loopcoder_suite.sh does
+    # this automatically from the bundle's wheelhouse), the %post installs
+    # offline with --no-index. If empty/absent, %post falls back to PyPI
+    # (works only inside the Bundle VM that has internet anyway).
+    wheels/ /opt/loopcoder-src/wheels
+
+%post
+    set -eux
+
+    apt-get update
+    apt-get install -y --no-install-recommends \
+        git \
+        curl \
+        ca-certificates \
+        less \
+        ripgrep
+    rm -rf /var/lib/apt/lists/*
+
+    if [ -d /opt/loopcoder-src/wheels ] && [ "$(ls -A /opt/loopcoder-src/wheels 2>/dev/null)" ]; then
+        echo "[suite-build] using offline wheelhouse at /opt/loopcoder-src/wheels"
+        pip install --no-cache-dir --no-index \
+            --find-links /opt/loopcoder-src/wheels \
+            --upgrade pip wheel setuptools
+        pip install --no-cache-dir --no-index \
+            --find-links /opt/loopcoder-src/wheels \
+            loopcoder
+    else
+        echo "[suite-build] no wheelhouse; falling back to PyPI (requires internet)"
+        pip install --no-cache-dir --upgrade pip wheel setuptools
+        pip install --no-cache-dir /opt/loopcoder-src
+    fi
+
+    # Sanity: agent imports + CLI works
+    python -c "import loopcoder; print('loopcoder', loopcoder.__version__)"
+    loopcoder --version
+
+    mkdir -p /workspaces /state /etc/loopcoder /var/log/loopcoder
+    chmod 1777 /workspaces /state /var/log/loopcoder
+
+%environment
+    export PYTHONUNBUFFERED=1
+    export PYTHONDONTWRITEBYTECODE=1
+    # State / logs / workspaces resolve to bind-mounts on the host.
+    export LOOPCODER_INSTALL_YAML=/etc/loopcoder/install.yaml
+    export LOOPCODER_VLLM_YAML=/etc/loopcoder/vllm.yaml
+    export LOOPCODER_YAML=/etc/loopcoder/loopcoder.yaml
+
+%runscript
+    # Default entrypoint = HTTP API. systemd unit invokes this directly.
+    exec loopcoder serve \
+        --host 0.0.0.0 \
+        --port 8765 \
+        --config "${LOOPCODER_YAML:-/etc/loopcoder/loopcoder.yaml}" \
+        "$@"
+
+%apprun api
+    exec loopcoder serve --host 0.0.0.0 --port 8765
+
+%apprun mcp
+    exec loopcoder mcp --transport sse --host 0.0.0.0 --port 8766
+
+%apprun cli
+    exec loopcoder "$@"
+
+%test
+    loopcoder --version
+    loopcoder config validate \
+        --install   /opt/loopcoder-src/config/install.yaml.example \
+        --vllm      /opt/loopcoder-src/config/vllm.yaml.example \
+        --loopcoder /opt/loopcoder-src/config/loopcoder.yaml.example \
+        || true   # missing /etc/loopcoder is expected here
+
+%labels
+    org.loopcoder.role suite
+    org.loopcoder.components agent,api,mcp

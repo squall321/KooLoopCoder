@@ -1,47 +1,113 @@
 # LoopCoder
 
-LoopCoder는 자체 호스팅 LLM(예: Qwen3-Coder-480B FP8 on vLLM)을 사용해
-사용자가 작성한 plan(목표·검증조건 명세)을 보고 코드를 점진적으로 작성·디버깅하며
-모든 goal이 검증 통과할 때까지 반복하는 에이전트입니다.
+[![tests](https://github.com/squall321/KooLoopCoder/actions/workflows/test.yml/badge.svg)](https://github.com/squall321/KooLoopCoder/actions/workflows/test.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-## 빠른 시작 (B300 서버)
+**Self-hosted iterative coding agent.** Drives a local vLLM (default:
+Qwen3-Coder-480B-FP8) through a PDCA loop until every goal's
+acceptance check passes. Verification runs OUTSIDE the LLM so the
+model cannot fake completion. Runs offline on air-gapped GPU servers.
+
+The whole runtime is packaged as Apptainer SIFs (`vllm.sif`,
+`loopcoder-suite.sif`, `loopcoder-sandbox.sif`). The host needs only
+the NVIDIA driver and Apptainer.
+
+---
+
+## What's in the box
+
+```
+GPU host
+ ├─ /opt/apptainers/                          ← versioned SIFs (atomic upgrades)
+ │   └─ current/{vllm,loopcoder-suite,loopcoder-sandbox}.sif
+ │
+ ├─ /scratch/models/<model_id>/                ← weights, persistent (never inside SIF)
+ ├─ /scratch/workspaces/                       ← per-project workspaces
+ │
+ ├─ systemd: vllm.service                     :8000 (loopback)
+ ├─ systemd: loopcoder.service                :8765 (HTTP API), :8766 (MCP-SSE)
+ │
+ └─ sshd                                      :22  (only externally exposed port)
+```
+
+User connects from any machine via **VS Code Remote-SSH** + the
+LoopCoder VS Code extension. No browser GUI on the server, no TLS
+plumbing, no passwords beyond SSH keys.
+
+---
+
+## Quickstart (host already has driver + apptainer)
 
 ```bash
+# On the GPU server (one-time, as root):
 sudo bash setup.sh
-loopcoder run --plan examples/plan_simple.yaml
+
+# Verify
+sudo systemctl status vllm
+sudo systemctl status loopcoder
+curl -sf http://127.0.0.1:8765/v1/health      # → {"status":"ok",...}
+
+# From your laptop:
+ssh -L 8765:127.0.0.1:8765 b300                # tunnel API
+# In a separate VS Code window: F1 → Remote-SSH: Connect to Host → b300
+# Open /scratch/workspaces/<your-project>
+# Author plan.yaml → command: "LoopCoder: Run Plan from Active Editor"
 ```
 
-## 빠른 시작 (개발 머신, 호스트 22.04)
+Detailed onboarding: see [`HANDOFF.md`](HANDOFF.md), planning at
+[`PLAN.md`](PLAN.md), live status at [`PROGRESS.md`](PROGRESS.md).
 
-```bash
-# 인터넷 머신에서 번들 빌드 (24.04 VM 사용)
-bash bundle.sh
+---
 
-# Test VM에서 setup.sh 자동 검증 (인터넷 차단 + GPU 없음)
-bash test_setup.sh
+## Repository layout
 
-# 통과하면 B300으로 전송
-rsync -avP /data/loopcoder-bundle/ b300:/models/
-```
+| Path | Purpose |
+|---|---|
+| `agent/loopcoder/` | Python package: agent core, HTTP API, MCP server, CLI |
+| `agent/tests/` | 139 unit + mock-E2E tests (run with `pytest agent/tests/`) |
+| `containers/*.def` | Apptainer recipes for vllm / suite / sandbox SIFs |
+| `bundle.sh` + `bundle/` | Bundle builder using a 24.04 KVM VM (offline target ready) |
+| `setup.sh` | Offline 14-stage installer for the GPU host |
+| `test_setup.sh` + `bundle/test_vm/` | No-internet, no-GPU Test VM that re-runs setup.sh and asserts post-conditions |
+| `scripts/upgrade-suite.sh` | Atomic SIF upgrade: `cp` + `ln -sfn` + `systemctl restart` |
+| `scripts/windows/` | PowerShell + .bat for downloading huge models on Windows |
+| `vscode-extension/` | TypeScript VS Code / Cursor / Windsurf extension |
+| `config/*.yaml.example` | Pydantic-validated config templates |
+| `examples/` | Demo plans: `plan_simple`, `plan_refactor`, `plan_fastapi_hello`, `tiny-end-to-end.sh` |
+| `docs/manuals/` | `model-download-windows.md`, `remote-ssh-workflow.md` |
 
-## 구성
+---
 
-- `bundle.sh` — 인터넷 가능 머신용 번들 빌더 (24.04 VM 안에서 수집)
-- `test_setup.sh` — Test VM에서 setup.sh 자동 검증
-- `setup.sh` — B300 노드용 오프라인 설치 스크립트
-- `agent/loopcoder/` — Python 에이전트 패키지
-- `config/*.yaml.example` — 설정 템플릿 (install/vllm/loopcoder)
+## Why this exists
 
-상세 계획은 상위 디렉토리의 `PLAN.md`를, 진행 현황은 `PROGRESS.md`를 참조하세요.
+1. **Goal-driven loop with external verification.** The agent cannot lie
+   about completion. Acceptance commands run in the host (or
+   sandbox), and only their real-world result counts.
+2. **Context preservation.** Verify logs and pinned files are NEVER
+   truncated, even under tight token budgets.
+3. **Offline-first.** Designed for air-gapped GPU servers. All
+   dependencies (apt, Python wheels, Apptainer SIFs) are bundled on a
+   build host and shipped as one tree.
+4. **Apptainer-native.** Every component is a self-contained SIF.
+   Upgrade = swap a file. No Docker on the GPU host.
 
-## 주요 특징
+---
 
-- **검증 외부화**: LLM이 "다 됐다"고 보고해도 acceptance 명령이 외부에서 실제 실행되어 통과해야 done
-- **무한 루프 안전장치**: iter/시간/토큰 한도 + 연속 실패시 자동 롤백
-- **컨텍스트 보존**: verify 로그·diff는 절대 요약·잘림 없이 컨텍스트에 유지 (1M 활용)
-- **오프라인 친화**: B300이 인터넷 없어도 동작, 모든 의존성을 사전 번들링
-- **Apptainer 샌드박스**: Docker 의존 없음, HPC 친화
+## Status
 
-## 라이선스
+- 50 Python files / ~5,500 lines, **139 / 139 unit + mock-E2E tests
+  pass**.
+- HTTP API verified live (16 routes), MCP server (stdio + SSE)
+  verified, VS Code extension TypeScript compiles + .vsix builds (22
+  KB).
+- Demo plans validate; tiny model
+  (`Qwen2.5-Coder-0.5B-Instruct`, ~954 MB) downloaded & smoke-validated
+  on dev hardware.
+- Full Bundle/Test VM lifecycle and B300 deployment are scripted but
+  end-to-end run on real hardware is left to the operator.
 
-MIT
+See [`CHANGELOG.md`](CHANGELOG.md) for the 0.1.0 release notes.
+
+## License
+
+[MIT](LICENSE)

@@ -45,8 +45,25 @@ class ModelConfig(BaseModel):
 
 
 class ContainerConfig(BaseModel):
+    """Apptainer .sif locations.
+
+    Production layout uses ``/opt/apptainers/`` as the SIF store with a
+    ``current/`` directory of stable symlinks. Upgrades become:
+
+        cp new.sif /opt/apptainers/
+        ln -sfn new.sif /opt/apptainers/current/<name>.sif
+        systemctl restart <unit>
+
+    The ``vllm_image`` / ``sandbox_image`` / ``suite_image`` fields can
+    point at either: (a) absolute paths inside ``current/`` (recommended);
+    (b) any other absolute path (e.g. legacy /scratch/loopcoder/containers/).
+    """
+
     vllm_image: str
     sandbox_image: str
+    suite_image: str | None = None
+    store_dir: str = "/opt/apptainers"
+    current_dir: str = "/opt/apptainers/current"
 
 
 class SystemConfig(BaseModel):

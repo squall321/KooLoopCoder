@@ -352,3 +352,19 @@
   - E2E-7 verify_log SQLite 영속성 + ContextBuilder 우선순위 정적 검증 (verify_log < attempt 보장)
 - 2026-05-06 ruff 통과: 19개 위반 모두 수정 (4개 자동, 15개 import 순서 정리). 0 errors.
 - 2026-05-06 **최종 테스트 매트릭스: 129/129 PASS** (단위 123 + mock-E2E 6).
+- 2026-05-06 **Apptainer 운영 패턴 도입 (`/opt/apptainers/` + `current/` 심볼릭)**:
+  - `containers/loopcoder-suite.def` 신규 (agent + API + MCP, ~250MB 예상). %files에 wheels/ 포함, %post에 wheelhouse 우선·없으면 PyPI fallback. apprun api/mcp/cli 3종.
+  - `systemd/loopcoder.service.template` 신규 (suite SIF 인스턴스 운영, 8765/8766).
+  - `setup.sh` Stage 8/9 갱신: SIFs를 `/opt/apptainers/<basename>` 으로 복사 + atomic 심볼릭 `current/` 생성, systemd 두 unit 모두 enable.
+  - `scripts/upgrade-suite.sh` 신규: cp + ln -sfn + systemctl restart 단일 명령. `--keep N`으로 구버전 SIF 자동 정리. `--no-restart` 옵션.
+  - `bundle/in_vm/collect_loopcoder_suite.sh` 신규: wheels/ 자동 임베드 후 sudo apptainer build.
+  - `install.yaml.example` + `.tiny`: container.{store_dir, current_dir, suite_image} 추가.
+  - `bundle.sh`: 모델 분리 정책 — `--skip-model`이 기본값. 명시적 `--include-model` 옵션 신설.
+  - `docs/manuals/remote-ssh-workflow.md` 신규: SSH 터널 + VS Code Remote-SSH + LoopCoder .vsix 워크플로우 매뉴얼 (8절).
+  - VS Code 확장 `.vsix` 빌드 (22.62KB, 18 files) — `vscode-extension/dist/loopcoder-vscode-0.1.0.vsix`. (gitignored)
+- 2026-05-06 **오프라인 의존성 동기화** (사용자 지적):
+  - `collect_wheels.sh` 재작성: 명시적 dep list 폐기, `pip wheel <SRC>`로 pyproject.toml 의존성 자동 해석. 새 fastapi/uvicorn/sse-starlette/mcp 자동 포함.
+  - 실제 빌드 시도 결과: 72 wheels / 39MB / 오프라인 install + import 자가검증 통과. loopcoder + 23 tools 모두 정상 import.
+- 2026-05-06 단위테스트 추가: `test_config_container.py` (5), `test_upgrade_script.py` (5). README 갱신 (badges + 새 아키텍처).
+- 2026-05-06 **최종: 139/139 PASS + ruff 0 errors + 25 shell scripts syntax OK**.
+

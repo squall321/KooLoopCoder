@@ -10,10 +10,13 @@ htmlcov/
 
 # All build outputs (bundle, VM disks, test scratch, test results, logs)
 output/
+build/
+dist/
 *.qcow2
 *.iso
 *.sif
 *.log
+/tmp/lc-wheels-test/
 
 # OS / editor
 .DS_Store

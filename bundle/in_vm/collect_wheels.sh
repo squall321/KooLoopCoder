@@ -1,59 +1,85 @@
 #!/usr/bin/env bash
-# Inside Bundle VM: download Python wheels (manylinux/cp312) for the
-# loopcoder package and its dependencies. The B300 node will then
-# `pip install --no-index --find-links wheels/`.
+# Inside Bundle VM: download / build Python wheels for the offline B300
+# install. The result is a self-contained directory the B300 can use as:
+#
+#   pip install --no-index --find-links wheels/  loopcoder
+#
+# Strategy (avoids drift from pyproject.toml):
+#   1. `pip wheel <SRC>` — builds OUR wheel + every transitive dep into
+#      `$OUT`. Dependencies are read straight from pyproject.toml so adding
+#      a new dep there is automatically reflected in the bundle.
+#   2. Add bootstrap pip/setuptools/wheel separately (so the offline target
+#      can re-run pip install without prior internet).
+#   3. Add test-only deps (pytest, ruff, mypy) so the suite SIF can run
+#      its own self-tests without network.
 #
 # Args:
-#   $1 = output directory (e.g. /output/wheels)
-#   $2 = loopcoder source tree (e.g. /home/loopcoder/loopcoder-src)
+#   $1 = output directory  (e.g. /output/wheels)
+#   $2 = loopcoder source  (e.g. /home/loopcoder/loopcoder-src)
 
 set -euo pipefail
 OUT="${1:?output dir}"
 SRC="${2:?source dir}"
-
 mkdir -p "$OUT"
 
-# Stable list of agent dependencies. Keep in sync with pyproject.toml.
-DEPS=(
-    "pip"
-    "wheel"
-    "setuptools"
-    "pydantic>=2.6,<3"
-    "pyyaml>=6.0,<7"
-    "jinja2>=3.1,<4"
-    "openai>=1.30,<2"
-    "tiktoken>=0.7,<1"
-    "rich>=13.7,<14"
-    "click>=8.1,<9"
-    "GitPython>=3.1,<4"
-    "sqlalchemy>=2.0,<3"
-    "tenacity>=8.2,<9"
-    "platformdirs>=4.2,<5"
-    "httpx>=0.27,<1"
-    # vLLM client smoke check + tests on the B300
-    "pytest>=8.0"
-    "pytest-cov>=5.0"
+PY_VER="3.12"
+PLATFORM_ARGS=(
+    --python-version "$PY_VER"
+    --platform manylinux_2_28_x86_64
+    --platform manylinux2014_x86_64
+    --platform any
+    --only-binary=:all:
 )
 
-echo "[wheels] downloading ${#DEPS[@]} dep specs to $OUT"
+echo "[wheels] (1/3) bootstrap pip/setuptools/wheel"
+python3 -m pip download "${PLATFORM_ARGS[@]}" --dest "$OUT" \
+    "pip>=24" "wheel>=0.42" "setuptools>=68"
+
+echo "[wheels] (2/3) loopcoder + every dep declared in pyproject.toml"
+# Use `pip wheel` so transitive deps come along automatically. We also
+# pass the source dir twice (once via constraints to download with the
+# matrix above, once via wheel to actually build the loopcoder wheel).
+python3 -m pip wheel \
+    --wheel-dir "$OUT" \
+    "$SRC"
+
+# Some pure-python packages (e.g. mcp) only ship sdists. Re-run download
+# with --no-binary fallback to grab those too if pip wheel didn't pull them.
+echo "[wheels] (3/3) sdist fallback for source-only deps"
 python3 -m pip download \
     --dest "$OUT" \
-    --python-version 3.12 \
-    --platform manylinux_2_28_x86_64 \
-    --platform manylinux2014_x86_64 \
-    --platform any \
-    --only-binary=:all: \
-    "${DEPS[@]}"
+    --no-deps \
+    "mcp>=1.0,<2" \
+    "sse-starlette>=2.0,<3" \
+    || echo "  (some packages already present; ignoring duplicate-download warnings)"
 
-# Build the loopcoder wheel itself from the source tree.
-python3 -m pip wheel --no-deps --wheel-dir "$OUT" "$SRC"
+# Test-only deps (ship them so post-install self-tests work offline).
+echo "[wheels] (4/4) test-only deps"
+python3 -m pip download "${PLATFORM_ARGS[@]}" --dest "$OUT" \
+    "pytest>=8.0" "pytest-cov>=5.0" "ruff>=0.5"
 
-echo "[wheels] $(ls -1 "$OUT" | wc -l) wheel/sdist files"
+echo "[wheels] $(ls -1 "$OUT" | wc -l) wheel/sdist files in $OUT"
+echo "[wheels] $(du -sh "$OUT" | cut -f1) total"
 
-# Quick verify: try a no-network install into a throwaway venv
+# ------------- Verify -------------
+# We must be able to install the loopcoder wheel using ONLY the wheelhouse,
+# with no network. This catches missing transitive deps.
 TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT
+
+echo "[wheels] verifying offline install into throwaway venv"
 python3 -m venv "$TMP/venv"
 "$TMP/venv/bin/pip" install --no-index --find-links "$OUT" --quiet \
-    pydantic openai click jinja2 GitPython
-"$TMP/venv/bin/python" -c "import pydantic, openai, click, jinja2, git; print('[wheels] verify OK')"
-rm -rf "$TMP"
+    --upgrade pip wheel setuptools
+"$TMP/venv/bin/pip" install --no-index --find-links "$OUT" --quiet loopcoder
+
+# Smoke-test the installed CLI + each subsystem
+"$TMP/venv/bin/loopcoder" --version
+"$TMP/venv/bin/python" - <<'PY'
+import loopcoder
+import loopcoder.api.server
+import loopcoder.mcp.server
+from loopcoder.tools.registry import default_registry
+print("loopcoder", loopcoder.__version__, "tools:", len(default_registry().names()))
+PY
+echo "[wheels] verify OK"

@@ -1,0 +1,37 @@
+[Unit]
+Description=LoopCoder Suite — agent + HTTP API + MCP server (Apptainer)
+After=network-online.target vllm.service
+Wants=network-online.target
+# vllm.service is recommended but not strictly required: the agent runs even
+# if vLLM is down (it just can't make calls). Use After= but not Requires=.
+
+[Service]
+Type=simple
+User=@USER@
+Group=@GROUP@
+
+# Suite SIF lives in /opt/apptainers/current/ via stable symlink, so
+# upgrades become `cp + ln -sfn + systemctl restart`.
+ExecStartPre=/bin/bash -c 'test -L "@SUITE_SIF@" || test -f "@SUITE_SIF@" || (echo "missing suite sif: @SUITE_SIF@" >&2; exit 1)'
+
+ExecStart=/usr/bin/apptainer run \
+  --bind @WORKSPACES_DIR@:/workspaces \
+  --bind @STATE_DIR@:/state \
+  --bind @LOG_DIR@:/var/log/loopcoder \
+  --bind @ETC_DIR@:/etc/loopcoder:ro \
+  --bind @SANDBOX_SIF@:/opt/loopcoder/sandbox.sif:ro \
+  --env LOOPCODER_API_KEY=${LOOPCODER_API_KEY} \
+  --env LOOPCODER_API_HOST=${LOOPCODER_API_HOST} \
+  --env LOOPCODER_API_PORT=${LOOPCODER_API_PORT} \
+  @SUITE_SIF@
+
+Restart=@SYSTEMD_RESTART@
+RestartSec=@SYSTEMD_RESTART_SEC@
+LimitNOFILE=1048576
+StandardOutput=append:@LOG_DIR@/loopcoder.log
+StandardError=append:@LOG_DIR@/loopcoder.log
+
+EnvironmentFile=-@ETC_DIR@/loopcoder.env
+
+[Install]
+WantedBy=multi-user.target
