@@ -18,6 +18,10 @@ from tenacity import (
     wait_exponential,
 )
 
+from loopcoder.logsetup import get_logger
+
+log = get_logger("loopcoder.llm")
+
 try:
     import openai  # type: ignore[import-not-found]
     from openai import OpenAI  # type: ignore[import-not-found]
@@ -121,6 +125,14 @@ class LlmClient:
         completion = self._chat(**kwargs)
         choice = completion.choices[0]
         msg = choice.message
+        usage = getattr(completion, "usage", None)
+        log.debug(
+            "llm chat done (model=%s, prompt=%s, completion=%s, tools=%s)",
+            self.model,
+            getattr(usage, "prompt_tokens", "?") if usage else "?",
+            getattr(usage, "completion_tokens", "?") if usage else "?",
+            len(tools_list) if tools_list else 0,
+        )
 
         tool_calls: list[LlmToolCall] = []
         for tc in (getattr(msg, "tool_calls", None) or []):
@@ -132,7 +144,6 @@ class LlmClient:
                 )
             )
 
-        usage = getattr(completion, "usage", None)
         return LlmResponse(
             content=msg.content,
             tool_calls=tool_calls,

@@ -23,6 +23,9 @@ from typing import Any
 from loopcoder.config import LoopCoderConfig
 from loopcoder.events import Event, EventBus
 from loopcoder.llm.client import LlmClient
+from loopcoder.logsetup import get_logger
+
+log = get_logger("loopcoder.loop")
 from loopcoder.llm.context import ContextBuilder, ContextSection
 from loopcoder.llm.prompts import (
     FAILURE_FEEDBACK_PROMPT,
@@ -128,6 +131,7 @@ class LoopController:
 
     def run(self, only_goal: str | None = None, plan_path: str | None = None) -> list[GoalOutcome]:
         self.session_id = self.store.start_session(plan_path=plan_path)
+        log.info("session %s started (project=%s)", self.session_id, self.plan.project.name)
         self._emit("session.started", project=self.plan.project.name, plan_path=plan_path)
         try:
             self._prepare_workspace()
@@ -176,6 +180,7 @@ class LoopController:
 
     def _run_goal(self, goal: Goal, session_start: float) -> GoalOutcome:
         self.store.start_goal(self.session_id, goal.id)
+        log.info("goal %s started: %s (%d acceptance)", goal.id, goal.title, len(goal.acceptance))
         self._emit("goal.started", goal_id=goal.id, title=goal.title,
                    acceptance_count=len(goal.acceptance))
         consecutive_failures = 0

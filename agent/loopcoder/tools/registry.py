@@ -6,8 +6,11 @@ import json
 import time
 from typing import Any
 
+from loopcoder.logsetup import get_logger
 from loopcoder.tools.base import Tool, ToolContext, ToolError, ToolResult
 from loopcoder.tools.hooks import HookRegistry, default_hooks
+
+log = get_logger("loopcoder.tools")
 
 
 class ToolRegistry:
@@ -69,6 +72,7 @@ class ToolRegistry:
         try:
             self.hooks.run_pre(name, params_dump, ctx)
         except ToolError as e:
+            log.info("pre-hook blocked %s: %s", name, e)
             return ToolResult(
                 ok=False,
                 output=str(e),
@@ -84,8 +88,8 @@ class ToolRegistry:
         # Post-hooks (do not change ok/output, but observe & record)
         try:
             self.hooks.run_post(name, params_dump, result, ctx)
-        except Exception:
-            pass  # post hook bugs must not break the loop
+        except Exception as e:
+            log.warning("post-hook crashed for %s: %r", name, e)
         return result
 
 

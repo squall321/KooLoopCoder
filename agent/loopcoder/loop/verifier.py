@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from loopcoder.logsetup import get_logger
 from loopcoder.plan.schema import (
     AcceptanceCheck,
     FileContainsAcceptance,
@@ -21,6 +22,8 @@ from loopcoder.plan.schema import (
     HttpAcceptance,
     ShellAcceptance,
 )
+
+log = get_logger("loopcoder.verifier")
 
 
 @dataclass
@@ -70,6 +73,10 @@ class Verifier:
         for r in results:
             mark = "PASS" if r.passed else "FAIL"
             log_lines.append(f"[{mark}] ({r.kind}) {r.detail}")
+        log.info("verify %s (%d/%d checks)",
+                 "PASS" if passed else "FAIL",
+                 sum(1 for r in results if r.passed),
+                 len(results))
         return VerificationResult(passed=passed, checks=results, log="\n".join(log_lines))
 
     # ---------- individual checks ----------
