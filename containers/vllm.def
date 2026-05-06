@@ -15,8 +15,15 @@ From: vllm/vllm-openai:latest
 
 %post
     set -eux
+    # Ensure `python` exists alongside `python3` (vllm/vllm-openai images
+    # ship only python3) so systemd unit + scripts invoking `python` work.
+    if ! command -v python >/dev/null 2>&1; then
+        if command -v python3 >/dev/null 2>&1; then
+            ln -sf "$(command -v python3)" /usr/local/bin/python
+        fi
+    fi
     # Smoke-check vLLM imports inside the image
-    python -c "import vllm; print('vllm', vllm.__version__)"
+    python3 -c "import vllm; print('vllm', vllm.__version__)"
 
 %environment
     export HF_HUB_OFFLINE=1
