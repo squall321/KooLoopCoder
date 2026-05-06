@@ -1,0 +1,99 @@
+# Refactoring plan: split a monolithic function into smaller ones while
+# keeping all existing tests green.
+
+project:
+  name: refactor_calculator
+  workspace: /scratch/workspaces/refactor_calculator
+  language: python
+
+constraints:
+  max_iterations_per_goal: 30
+  max_total_minutes: 45
+  forbidden_paths:
+    - "**/.env"
+  allowed_shell_commands:
+    - "pytest*"
+    - "python*"
+    - "ls*"
+    - "cat *"
+    - "grep *"
+    - "git diff*"
+    - "git log*"
+    - "git status*"
+  network_allowed: false
+
+context:
+  description: |
+    The calculator module has grown into a 200-line `evaluate()` function
+    with multiple responsibilities. Refactor it into smaller, single-purpose
+    functions while keeping the public API (the `evaluate(expr: str) -> float`
+    signature) stable. Existing tests must keep passing throughout.
+  files_to_read_first:
+    - src/calculator.py
+    - tests/test_calculator.py
+
+goals:
+  - id: baseline_passes
+    title: "Baseline tests pass"
+    description: |
+      Confirm that the existing tests pass before any refactor.
+    acceptance:
+      - kind: shell
+        run: "pytest -q tests/test_calculator.py"
+        timeout: 60
+        expect:
+          exit_code: 0
+
+  - id: split_tokenizer
+    title: "Extract tokenizer into its own function"
+    description: |
+      Split the lexing logic (the inner loop that turns "1 + 2*3" into
+      tokens) into a dedicated `_tokenize(expr) -> list[Token]` function.
+      Public API must not change. All tests must still pass.
+    depends_on: [baseline_passes]
+    acceptance:
+      - kind: file_contains
+        path: src/calculator.py
+        pattern: "def\\s+_tokenize"
+      - kind: file_contains
+        path: src/calculator.py
+        pattern: "def\\s+evaluate"
+      - kind: shell
+        run: "pytest -q tests/test_calculator.py"
+        timeout: 60
+        expect:
+          exit_code: 0
+
+  - id: split_parser
+    title: "Extract parser"
+    description: |
+      Pull the precedence-aware parsing into `_parse(tokens) -> Node`.
+      `evaluate()` becomes `_parse(_tokenize(expr))` plus the existing
+      tree walker.
+    depends_on: [split_tokenizer]
+    acceptance:
+      - kind: file_contains
+        path: src/calculator.py
+        pattern: "def\\s+_parse"
+      - kind: shell
+        run: "pytest -q tests/test_calculator.py"
+        timeout: 60
+        expect:
+          exit_code: 0
+
+  - id: regression_check
+    title: "Final regression check"
+    description: |
+      Run the full test suite once more. evaluate() must still expose the
+      exact same signature and behavior.
+    depends_on: [split_parser]
+    acceptance:
+      - kind: shell
+        run: "pytest -q"
+        timeout: 120
+        expect:
+          exit_code: 0
+          stdout_contains: "passed"
+      - kind: file_contains
+        path: src/calculator.py
+        pattern: "def\\s+evaluate\\(expr"

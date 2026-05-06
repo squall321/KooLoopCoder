@@ -1,0 +1,73 @@
+# Build a tiny FastAPI service from scratch and verify it serves /hello.
+
+project:
+  name: fastapi_hello
+  workspace: /scratch/workspaces/fastapi_hello
+  language: python
+
+constraints:
+  max_iterations_per_goal: 25
+  max_total_minutes: 30
+  forbidden_paths:
+    - "**/.env"
+    - "**/secrets/**"
+  allowed_shell_commands:
+    - "pytest*"
+    - "python*"
+    - "pip*"
+    - "uv*"
+    - "ls*"
+    - "cat *"
+    - "grep *"
+  network_allowed: false   # uses cached wheels via pip --no-index
+
+context:
+  description: |
+    Build a small FastAPI service that exposes a single GET endpoint:
+    /hello?name=<name> returning JSON {"greeting": "hello, <name>"}.
+    If `name` is omitted, it defaults to "world". Add a pytest using
+    fastapi.testclient.TestClient.
+
+goals:
+  - id: skeleton
+    title: "Project skeleton"
+    description: |
+      Create requirements.txt with fastapi and httpx, a src/app.py module
+      with the FastAPI() instance, and a tests/ directory.
+    acceptance:
+      - kind: file_exists
+        path: src/app.py
+      - kind: file_contains
+        path: src/app.py
+        pattern: "FastAPI\\("
+
+  - id: hello_endpoint
+    title: "/hello endpoint with TestClient"
+    description: |
+      Implement GET /hello?name=... that returns {"greeting": "hello, <name>"}.
+      Default name is "world". Add tests/test_hello.py that uses
+      fastapi.testclient.TestClient to verify both default and explicit
+      name. Tests must pass.
+    depends_on: [skeleton]
+    acceptance:
+      - kind: file_exists
+        path: tests/test_hello.py
+      - kind: shell
+        run: "pytest -q tests/test_hello.py"
+        timeout: 90
+        expect:
+          exit_code: 0
+          stdout_contains: "passed"
+
+  - id: edge_cases
+    title: "Edge cases"
+    description: |
+      Reject names longer than 100 chars with HTTP 422.
+      Add a corresponding test.
+    depends_on: [hello_endpoint]
+    acceptance:
+      - kind: shell
+        run: "pytest -q tests/test_hello.py -k edge_or_long"
+        timeout: 60
+        expect:
+          exit_code: 0

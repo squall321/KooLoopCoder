@@ -1,0 +1,31 @@
+# Tiny-model variant of install.yaml — for end-to-end testing on dev hosts
+# without the full 480GB Qwen3-Coder. ~1GB total, runs on a single GPU or
+# even CPU (vLLM CPU mode is slow but enough to validate the loop).
+
+deployment:
+  mode: offline
+  bundle_root: /models
+
+paths:
+  install_root: /scratch/loopcoder
+  model_cache: /scratch/models
+  workspaces_root: /scratch/workspaces
+  log_dir: /var/log/loopcoder
+  state_dir: /var/lib/loopcoder
+
+model:
+  id: "Qwen/Qwen2.5-Coder-0.5B-Instruct"
+  source_path: /models/Qwen2.5-Coder-0.5B-Instruct
+  destination_path: /scratch/models/Qwen2.5-Coder-0.5B-Instruct
+  staging:
+    strategy: rsync
+    verify_sha256: true
+
+container:
+  vllm_image: /models/containers/vllm.sif
+  sandbox_image: /scratch/loopcoder/containers/loopcoder-sandbox.sif
+
+system:
+  user: loopcoder
+  group: loopcoder
+  create_user: true

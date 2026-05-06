@@ -1,0 +1,34 @@
+#cloud-config
+# Test VM cloud-init. NO internet packages — VM has no network access.
+# We rely entirely on what was baked into the cloud image.
+
+users:
+  - name: loopcoder
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    lock_passwd: false
+    ssh_authorized_keys:
+      - "@PUBKEY@"
+
+ssh_pwauth: false
+
+# No package updates / installs (no internet)
+package_update: false
+packages: []
+
+runcmd:
+  - [ mkdir, -p, /models, /scratch ]
+  - [ chown, -R, "loopcoder:loopcoder", /scratch ]
+
+write_files:
+  - path: /etc/loopcoder-vm-marker
+    content: |
+      test-vm
+    permissions: '0644'
+
+power_state:
+  mode: reboot
+  delay: 5
+  message: "First boot done"
+  timeout: 30
+  condition: True

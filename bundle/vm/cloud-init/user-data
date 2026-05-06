@@ -1,0 +1,49 @@
+#cloud-config
+# Bundle VM cloud-init for Ubuntu 24.04. Internet ON.
+# Replaced @PUBKEY@ with the host's ssh key by setup_vm.sh.
+
+users:
+  - name: loopcoder
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    lock_passwd: false
+    ssh_authorized_keys:
+      - "@PUBKEY@"
+
+ssh_pwauth: false
+
+package_update: true
+package_upgrade: false
+packages:
+  - apptainer
+  - python3.12
+  - python3.12-venv
+  - python3.12-dev
+  - python3-pip
+  - apt-rdepends
+  - rsync
+  - jq
+  - curl
+  - ca-certificates
+  - git
+  - build-essential
+  - docker.io
+
+runcmd:
+  - [ systemctl, enable, --now, docker ]
+  - [ usermod, -aG, docker, loopcoder ]
+  - [ mkdir, -p, /output, /opt/loopcoder-source ]
+  - [ chown, -R, "loopcoder:loopcoder", /output, /opt/loopcoder-source ]
+
+write_files:
+  - path: /etc/loopcoder-vm-marker
+    content: |
+      bundle-vm
+    permissions: '0644'
+
+power_state:
+  mode: reboot
+  delay: 5
+  message: "First boot done; rebooting"
+  timeout: 30
+  condition: True

@@ -1,0 +1,29 @@
+# vLLM runtime configuration. systemd service reads vllm.env (rendered from this).
+# Copy to /etc/loopcoder/vllm.yaml.
+
+serving:
+  host: 127.0.0.1
+  port: 8000
+  api_key: ""                         # empty = no auth (loopback only)
+
+engine:
+  tensor_parallel_size: 8             # B300 ×8
+  max_model_len: 262144               # 256K context
+  max_num_seqs: 8                     # single-user; tune up for higher throughput
+  gpu_memory_utilization: 0.92
+  quantization: fp8
+  enable_prefix_caching: true
+  enable_chunked_prefill: true
+  swap_space_gb: 0
+  kv_cache_dtype: auto
+  trust_remote_code: false
+
+env:
+  HF_HUB_OFFLINE: "1"
+  TRANSFORMERS_OFFLINE: "1"
+  NCCL_P2P_LEVEL: "NVL"
+  VLLM_USE_V1: "1"
+
+systemd:
+  restart: on-failure
+  restart_sec: 15

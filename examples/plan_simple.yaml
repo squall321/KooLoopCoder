@@ -1,0 +1,60 @@
+# Demo plan: build a tiny Python module, then make tests pass.
+# Run with: loopcoder run --plan examples/plan_simple.yaml
+
+project:
+  name: hello_loopcoder
+  workspace: /scratch/workspaces/hello_loopcoder
+  language: python
+
+constraints:
+  max_iterations_per_goal: 20
+  max_total_minutes: 30
+  forbidden_paths:
+    - "**/.env"
+    - "**/secrets/**"
+  allowed_shell_commands:
+    - "pytest*"
+    - "python*"
+    - "ls*"
+    - "cat *"
+    - "grep *"
+  network_allowed: false
+
+context:
+  description: |
+    A tiny Python project demonstrating the LoopCoder loop. The agent must
+    create src/calculator.py with simple arithmetic functions, then make
+    the failing tests in tests/test_calculator.py pass.
+  files_to_read_first:
+    - tests/test_calculator.py
+  pin_in_context:
+    - path: tests/test_calculator.py
+
+goals:
+  - id: implement
+    title: "Implement calculator module"
+    description: |
+      Create src/calculator.py exposing four functions: add, subtract,
+      multiply, divide. divide(a, 0) must raise ValueError.
+    acceptance:
+      - kind: file_exists
+        path: src/calculator.py
+      - kind: file_contains
+        path: src/calculator.py
+        pattern: "def\\s+add"
+      - kind: file_contains
+        path: src/calculator.py
+        pattern: "def\\s+divide"
+
+  - id: tests_pass
+    title: "All tests pass"
+    description: |
+      The test suite at tests/test_calculator.py must pass with no failures.
+    depends_on: [implement]
+    acceptance:
+      - kind: shell
+        run: "pytest -q tests/test_calculator.py"
+        timeout: 60
+        expect:
+          exit_code: 0
+          stdout_contains: "passed"

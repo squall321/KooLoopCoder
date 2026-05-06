@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# All build outputs (bundle, VM disks, test scratch, test results, logs)
+output/
+*.qcow2
+*.iso
+*.sif
+*.log
+
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# Sample workspaces accidentally polluted
+examples/workspaces/*/.git/
+examples/workspaces/*/.pytest_cache/
+examples/workspaces/*/__pycache__/
+
+# Node / VS Code extension
+node_modules/
+vscode-extension/dist/
+vscode-extension/*.vsix
+package-lock.json
+
+# Local dev configs
+/tmp/lc-dev/

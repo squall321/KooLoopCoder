@@ -1,0 +1,146 @@
+{
+  "name": "loopcoder-vscode",
+  "displayName": "LoopCoder",
+  "description": "VS Code integration for the LoopCoder iterative coding agent.",
+  "version": "0.1.0",
+  "publisher": "koopark",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "AI",
+    "Other"
+  ],
+  "keywords": [
+    "agent",
+    "coding-agent",
+    "loopcoder",
+    "vllm",
+    "qwen"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onStartupFinished",
+    "onLanguage:yaml",
+    "workspaceContains:**/plan*.yaml"
+  ],
+  "contributes": {
+    "configuration": {
+      "type": "object",
+      "title": "LoopCoder",
+      "properties": {
+        "loopcoder.apiUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:8765",
+          "description": "Base URL of the LoopCoder HTTP API."
+        },
+        "loopcoder.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "Bearer token (optional). Set if your loopcoder serve was started with LOOPCODER_API_KEY."
+        },
+        "loopcoder.autoOpenLogPanel": {
+          "type": "boolean",
+          "default": true,
+          "description": "Open the LoopCoder Output panel automatically when a session starts."
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "loopcoder.runPlan",
+        "title": "LoopCoder: Run Plan…",
+        "icon": "$(rocket)"
+      },
+      {
+        "command": "loopcoder.runActivePlan",
+        "title": "LoopCoder: Run Plan from Active Editor",
+        "icon": "$(play)"
+      },
+      {
+        "command": "loopcoder.stopSession",
+        "title": "LoopCoder: Stop Active Session",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "loopcoder.refreshSessions",
+        "title": "LoopCoder: Refresh Sessions",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "loopcoder.openSessionReport",
+        "title": "LoopCoder: Open Session Report",
+        "icon": "$(notebook)"
+      },
+      {
+        "command": "loopcoder.exportSession",
+        "title": "LoopCoder: Export Session…"
+      },
+      {
+        "command": "loopcoder.showHealth",
+        "title": "LoopCoder: Show API Health"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "loopcoder.refreshSessions",
+          "when": "view == loopcoder.sessions",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "loopcoder.openSessionReport",
+          "when": "view == loopcoder.sessions && viewItem == session",
+          "group": "inline"
+        },
+        {
+          "command": "loopcoder.exportSession",
+          "when": "view == loopcoder.sessions && viewItem == session"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "loopcoder.runActivePlan",
+          "when": "resourceFilename =~ /plan.*\\.yaml$/",
+          "group": "navigation"
+        }
+      ]
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "loopcoder",
+          "title": "LoopCoder",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "loopcoder": [
+        {
+          "id": "loopcoder.sessions",
+          "name": "Sessions",
+          "icon": "media/icon.svg"
+        },
+        {
+          "id": "loopcoder.tools",
+          "name": "Tools"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -p ./ -w",
+    "package": "npx --yes @vscode/vsce package --out dist/",
+    "lint": "eslint src --ext ts"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.90.0",
+    "typescript": "^5.4.0"
+  }
+}

@@ -1,0 +1,39 @@
+[Unit]
+Description=LoopCoder vLLM Inference Server (Apptainer)
+After=network-online.target
+Wants=network-online.target
+RequiresMountsFor=@MODEL_DIR@
+
+[Service]
+Type=simple
+User=@USER@
+Group=@GROUP@
+EnvironmentFile=@ETC_DIR@/vllm.env
+ExecStartPre=/bin/bash -c 'test -f "${MODEL_DIR}/config.json" || (echo "model config.json not found at ${MODEL_DIR}" >&2; exit 1)'
+ExecStart=/usr/bin/apptainer run --nv \
+  --bind ${MODEL_DIR}:/model:ro \
+  --bind @CACHE_DIR@:/cache \
+  --env HF_HUB_OFFLINE=${HF_HUB_OFFLINE} \
+  --env TRANSFORMERS_OFFLINE=${TRANSFORMERS_OFFLINE} \
+  --env NCCL_P2P_LEVEL=${NCCL_P2P_LEVEL} \
+  --env VLLM_USE_V1=${VLLM_USE_V1} \
+  @VLLM_SIF@ \
+  /opt/vllm/bin/vllm serve /model \
+    --tensor-parallel-size ${TENSOR_PARALLEL_SIZE} \
+    --max-model-len ${MAX_MODEL_LEN} \
+    --gpu-memory-utilization ${GPU_MEMORY_UTILIZATION} \
+    --quantization ${QUANTIZATION} \
+    --enable-prefix-caching \
+    --enable-chunked-prefill \
+    --max-num-seqs ${MAX_NUM_SEQS} \
+    --kv-cache-dtype ${KV_CACHE_DTYPE} \
+    --host ${HOST} --port ${PORT}
+Restart=@SYSTEMD_RESTART@
+RestartSec=@SYSTEMD_RESTART_SEC@
+LimitNOFILE=1048576
+LimitMEMLOCK=infinity
+StandardOutput=append:@LOG_DIR@/vllm.log
+StandardError=append:@LOG_DIR@/vllm.log
+
+[Install]
+WantedBy=multi-user.target

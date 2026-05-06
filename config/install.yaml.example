@@ -1,0 +1,30 @@
+# LoopCoder install.yaml — bound at install time, rarely changes after.
+# Copy to /etc/loopcoder/install.yaml on the B300 node.
+
+deployment:
+  mode: offline                       # offline | online (B300 = offline)
+  bundle_root: /models                # NFS / shared mount where the bundle lives
+
+paths:
+  install_root: /scratch/loopcoder
+  model_cache: /scratch/models
+  workspaces_root: /scratch/workspaces
+  log_dir: /var/log/loopcoder
+  state_dir: /var/lib/loopcoder
+
+model:
+  id: "Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8"
+  source_path: /models/Qwen3-Coder-480B-A35B-Instruct-FP8
+  destination_path: /scratch/models/Qwen3-Coder-480B-A35B-Instruct-FP8
+  staging:
+    strategy: rsync                   # rsync | symlink | copy
+    verify_sha256: true
+
+container:
+  vllm_image: /models/containers/vllm.sif
+  sandbox_image: /scratch/loopcoder/containers/loopcoder-sandbox.sif
+
+system:
+  user: loopcoder
+  group: loopcoder
+  create_user: true

@@ -1,0 +1,31 @@
+Bootstrap: docker
+From: vllm/vllm-openai:latest
+
+# LoopCoder vLLM container.
+#
+# Built inside the Bundle VM (Ubuntu 24.04 + internet) via:
+#   apptainer build vllm.sif vllm.def
+#
+# The image entrypoint is `vllm` directly. systemd unit invokes:
+#   apptainer run --nv vllm.sif /opt/vllm/bin/vllm serve /model ...
+#
+# Pin the docker tag to a known digest in production. Use `docker pull
+# vllm/vllm-openai:<tag>` then `docker inspect` to capture the sha256 and
+# replace the `From:` line with `From: vllm/vllm-openai@sha256:...`.
+
+%post
+    set -eux
+    # Smoke-check vLLM imports inside the image
+    python -c "import vllm; print('vllm', vllm.__version__)"
+
+%environment
+    export HF_HUB_OFFLINE=1
+    export TRANSFORMERS_OFFLINE=1
+    export VLLM_USE_V1=1
+
+%runscript
+    exec "$@"
+
+%labels
+    org.loopcoder.role inference
+    org.loopcoder.engine vllm

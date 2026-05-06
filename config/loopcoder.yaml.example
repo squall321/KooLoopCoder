@@ -1,0 +1,95 @@
+# LoopCoder agent configuration. Copy to /etc/loopcoder/loopcoder.yaml.
+# All keys are optional: missing keys fall back to safe defaults from
+# loopcoder.config.LoopCoderConfig.
+
+llm:
+  base_url: http://127.0.0.1:8000/v1
+  api_key: EMPTY
+  model: "Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8"
+  temperature: 0.2
+  top_p: 0.95
+  max_completion_tokens: 8192
+  request_timeout_sec: 600
+  retry:
+    max_attempts: 5
+    backoff_initial_sec: 2
+    backoff_max_sec: 60
+
+context:
+  total_budget_tokens: 240000         # leave margin under 256K max_model_len
+  reserve_for_completion: 8192
+  always_pin:
+    - README.md
+    - CLAUDE.md
+    - AGENTS.md
+  preserve_full:
+    verify_logs: true                 # NEVER summarize / truncate
+    git_diff: true
+  summarize_oldest_when_over_pct: 70
+  per_file_max_kb: 256
+  grep_max_results: 200
+  list_dir_max_depth: 3
+  list_dir_max_entries: 500
+
+sandbox:
+  backend: apptainer                  # apptainer | host (host = opt-in, no isolation)
+  image: /scratch/loopcoder/containers/loopcoder-sandbox.sif
+  bind_mounts:
+    - source: "{workspace}"
+      dest: /workspace
+      mode: rw
+    - source: /scratch/loopcoder/cache
+      dest: /cache
+      mode: rw
+  network: false
+  read_only_paths:
+    - /etc
+    - /usr
+  default_cwd: /workspace
+  exec_timeout_sec: 600
+
+tools:
+  shell:
+    allowed_patterns:
+      - "pytest*"
+      - "python*"
+      - "python3*"
+      - "pip*"
+      - "uv*"
+      - "ls*"
+      - "cat *"
+      - "head *"
+      - "tail *"
+      - "grep *"
+      - "find *"
+      - "git *"
+      - "make*"
+      - "npm test*"
+      - "cargo test*"
+      - "go test*"
+    output_max_kb: 256
+    timeout_sec_default: 300
+  fs:
+    forbidden_paths:
+      - "**/.env"
+      - "**/secrets/**"
+      - "**/.ssh/**"
+      - "/etc/**"
+    max_read_bytes: 1048576
+
+loop:
+  max_iterations_per_goal: 50         # 0 = unbounded
+  max_total_minutes: 360              # 0 = unbounded
+  strategy_change_after: 3
+  rollback_after: 6
+  use_critic: false
+  parallel_goals: false
+
+storage:
+  state_db: /var/lib/loopcoder/sessions.db
+  log_dir: /var/log/loopcoder
+  workspaces_root: /scratch/workspaces
+
+ui:
+  tty: rich
+  log_level: INFO
