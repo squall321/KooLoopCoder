@@ -1,0 +1,53 @@
+# LoopCoder one-command deploy config.
+# Used by scripts/deploy.sh as:
+#     bash scripts/deploy.sh --config deploy.yaml
+#
+# What deploy.sh does, given this file:
+#   1. SSH probe to <target> (passwordless key required)
+#   2. rsync the entire bundle (apt + wheels + containers + source)
+#      to <remote_bundle> on the target
+#   3. apt-get install -y ./*.deb  (apptainer + deps; NOT dpkg)
+#   4. Optional: stage a model from <model.source> into <model.dest> on
+#      the target (or skip if the model is uploaded out-of-band)
+#   5. bash setup.sh on the target
+#   6. systemctl status vllm + loopcoder report
+# All steps are idempotent; rerunning resumes from the last good stage.
+
+target:
+  # ssh user@host. Must be passwordless key auth.
+  host: ubuntu@b300.example.org
+  # Optional. ssh -i, ssh ProxyCommand, etc.
+  ssh_opts: []                       # e.g. ["-J", "jump@bastion"]
+  # Where to drop the bundle on the remote. Read-only-ish; setup.sh
+  # uses this as $BUNDLE_ROOT.
+  remote_bundle: /models
+  # Sudo prefix on remote. Empty string disables; default = "sudo".
+  sudo_remote: sudo
+
+bundle:
+  # Local bundle directory. Defaults to LoopCoder/output/bundle when
+  # absent; falls back to /data/loopcoder-bundle if that's empty.
+  local_dir: /data/loopcoder-bundle
+
+flags:
+  # Pass through to setup.sh on the remote.
+  skip_gpu_stages: false             # true = Test VM mode (no nvidia-smi)
+  skip_model_stage: false            # true = leave /scratch/models alone
+
+# Optional: stage a model in the deploy step itself. Three modes:
+#   none   — do nothing (model already on the target via OOB upload)
+#   rsync  — local copy → target via rsync (the model lives on YOUR machine)
+#   hf     — download on the target via huggingface_hub (target needs internet,
+#            usually NOT the case on B300 — most teams use 'rsync' or 'none')
+model:
+  mode: none                          # none | rsync | hf
+
+  # If mode = rsync:
+  local_path: /data/models/Qwen2.5-Coder-1.5B-Instruct
+
+  # Where on the target the model lives at runtime. Should match
+  # install.yaml's model.destination_path.
+  remote_path: /scratch/models/Qwen2.5-Coder-1.5B-Instruct
+
+  # If mode = hf:
+  hf_id: Qwen/Qwen2.5-Coder-1.5B-Instruct

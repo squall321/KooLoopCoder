@@ -27,18 +27,52 @@ DRY=0
 APT_ONLY=0
 SETUP_ONLY=0
 SKIP_GPU=0
+SKIP_MODEL_STAGE=0
 SSH_OPTS=()
 SUDO_REMOTE="sudo"
+CONFIG_FILE=""
+MODEL_MODE="none"
+MODEL_LOCAL=""
+MODEL_REMOTE=""
+MODEL_HF_ID=""
+
+# Tiny helper: pull `key.subkey` from a YAML file. Uses python3 + pyyaml.
+yaml_get() {
+    local key="$1" file="$2"
+    python3 - "$key" "$file" <<'PY'
+import sys, yaml
+key = sys.argv[1].split(".")
+with open(sys.argv[2]) as f:
+    data = yaml.safe_load(f) or {}
+cur = data
+for k in key:
+    if isinstance(cur, dict) and k in cur:
+        cur = cur[k]
+    else:
+        cur = None
+        break
+if cur is None:
+    sys.exit(0)
+if isinstance(cur, list):
+    print(" ".join(str(x) for x in cur))
+elif isinstance(cur, bool):
+    print("true" if cur else "false")
+else:
+    print(cur)
+PY
+}
 
 # ---------- arg parse ----------
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        --config)        CONFIG_FILE="$2"; shift 2 ;;
         --bundle)        BUNDLE_DIR="$2"; shift 2 ;;
         --remote-bundle) REMOTE_BUNDLE="$2"; shift 2 ;;
         --dry-run)       DRY=1; shift ;;
         --apt-only)      APT_ONLY=1; shift ;;
         --setup-only)    SETUP_ONLY=1; shift ;;
         --skip-gpu-stages) SKIP_GPU=1; shift ;;
+        --skip-model-stage) SKIP_MODEL_STAGE=1; shift ;;
         --ssh-opt)       SSH_OPTS+=("$2"); shift 2 ;;
         --no-sudo)       SUDO_REMOTE=""; shift ;;
         -h|--help)
@@ -60,6 +94,30 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+# ---------- YAML config (overrides defaults; CLI flags win over YAML) ----------
+if [[ -n "$CONFIG_FILE" ]]; then
+    [[ -f "$CONFIG_FILE" ]] || { echo "config not found: $CONFIG_FILE" >&2; exit 2; }
+    [[ -z "$USER_HOST" ]]    && USER_HOST="$(yaml_get target.host "$CONFIG_FILE")"
+    rb="$(yaml_get target.remote_bundle "$CONFIG_FILE")"
+    [[ -n "$rb" && "$REMOTE_BUNDLE" == "/models" ]] && REMOTE_BUNDLE="$rb"
+    sd="$(yaml_get target.sudo_remote "$CONFIG_FILE")"
+    [[ -n "$sd" ]] && SUDO_REMOTE="$sd"
+    bd="$(yaml_get bundle.local_dir "$CONFIG_FILE")"
+    [[ -n "$bd" && -z "$BUNDLE_DIR" ]] && BUNDLE_DIR="$bd"
+    sgs="$(yaml_get flags.skip_gpu_stages "$CONFIG_FILE")"
+    [[ "$sgs" == "true" ]] && SKIP_GPU=1
+    sms="$(yaml_get flags.skip_model_stage "$CONFIG_FILE")"
+    [[ "$sms" == "true" ]] && SKIP_MODEL_STAGE=1
+    MODEL_MODE="$(yaml_get model.mode "$CONFIG_FILE")"
+    MODEL_LOCAL="$(yaml_get model.local_path "$CONFIG_FILE")"
+    MODEL_REMOTE="$(yaml_get model.remote_path "$CONFIG_FILE")"
+    MODEL_HF_ID="$(yaml_get model.hf_id "$CONFIG_FILE")"
+    # ssh_opts (space-separated)
+    for o in $(yaml_get target.ssh_opts "$CONFIG_FILE"); do
+        SSH_OPTS+=("$o")
+    done
+fi
 
 [[ -n "$USER_HOST" ]] || { echo "usage: $0 user@host [...]" >&2; exit 2; }
 
@@ -120,11 +178,43 @@ if [[ $SETUP_ONLY -eq 0 ]]; then
     ssh_run "apptainer --version 2>&1 | head -1"
 fi
 
+# ---------- model staging (per YAML config) ----------
+if [[ $APT_ONLY -eq 0 && $SKIP_MODEL_STAGE -eq 0 && "${MODEL_MODE:-none}" != "none" ]]; then
+    case "$MODEL_MODE" in
+        rsync)
+            [[ -d "$MODEL_LOCAL" ]] || fail "model.local_path not found: $MODEL_LOCAL"
+            [[ -n "$MODEL_REMOTE" ]] || fail "model.remote_path is required for rsync mode"
+            log "rsync model  $MODEL_LOCAL/  ->  $USER_HOST:$MODEL_REMOTE/"
+            ssh_run "${SUDO_REMOTE} mkdir -p $MODEL_REMOTE && ${SUDO_REMOTE} chown -R \$USER:\$USER $MODEL_REMOTE"
+            if [[ $DRY -eq 0 ]]; then
+                rsync -a --info=progress2 \
+                      -e "ssh ${SSH_OPTS[*]}" \
+                      "$MODEL_LOCAL/" "$USER_HOST:$MODEL_REMOTE/"
+            else
+                echo "[dry-run] rsync -a \"$MODEL_LOCAL/\" \"$USER_HOST:$MODEL_REMOTE/\""
+            fi
+            ;;
+        hf)
+            [[ -n "$MODEL_HF_ID" ]] || fail "model.hf_id is required for hf mode"
+            [[ -n "$MODEL_REMOTE" ]] || fail "model.remote_path is required for hf mode"
+            log "hf download on remote: $MODEL_HF_ID -> $MODEL_REMOTE"
+            ssh_run "${SUDO_REMOTE} mkdir -p $MODEL_REMOTE && ${SUDO_REMOTE} chown -R \$USER:\$USER $MODEL_REMOTE"
+            ssh_run "HF_HUB_ENABLE_HF_TRANSFER=1 python3 -m pip install --user --break-system-packages --quiet 'huggingface_hub' hf_transfer || true"
+            ssh_run "HF_HUB_ENABLE_HF_TRANSFER=1 \$HOME/.local/bin/huggingface-cli download '$MODEL_HF_ID' --local-dir '$MODEL_REMOTE' --local-dir-use-symlinks False --resume-download"
+            ;;
+        *)
+            fail "unknown model.mode: $MODEL_MODE (expected none|rsync|hf)"
+            ;;
+    esac
+fi
+
 # ---------- run setup.sh ----------
 if [[ $APT_ONLY -eq 0 ]]; then
     log "Remote: bash setup.sh"
     setup_args=()
     [[ $SKIP_GPU -eq 1 ]] && setup_args+=("--skip-gpu-stages")
+    [[ $SKIP_MODEL_STAGE -eq 1 ]] && setup_args+=("--skip-model-stage")
+    [[ "${MODEL_MODE:-none}" != "none" ]] && setup_args+=("--skip-model-stage")  # we just did it above
     ssh_run "${SUDO_REMOTE} bash $REMOTE_BUNDLE/source/LoopCoder/setup.sh --bundle $REMOTE_BUNDLE ${setup_args[*]}"
 fi
 
