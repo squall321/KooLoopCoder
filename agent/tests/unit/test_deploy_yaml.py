@@ -3,7 +3,6 @@
 import subprocess
 from pathlib import Path
 
-import pytest
 import yaml
 
 
@@ -46,7 +45,8 @@ def test_dry_run_with_yaml_uses_target_host(tmp_path: Path):
 def test_yaml_skip_gpu_flag_propagates(tmp_path: Path):
     cfg = tmp_path / "deploy.yaml"
     bundle = tmp_path / "bundle"
-    (bundle / "apt").mkdir(parents=True); (bundle / "wheels").mkdir()
+    (bundle / "apt").mkdir(parents=True)
+    (bundle / "wheels").mkdir()
     _write_cfg(cfg, flags={"skip_gpu_stages": True, "skip_model_stage": False},
                bundle={"local_dir": str(bundle)})
     res = subprocess.run(
@@ -60,7 +60,8 @@ def test_yaml_skip_gpu_flag_propagates(tmp_path: Path):
 def test_cli_overrides_yaml(tmp_path: Path):
     cfg = tmp_path / "deploy.yaml"
     bundle = tmp_path / "bundle"
-    (bundle / "apt").mkdir(parents=True); (bundle / "wheels").mkdir()
+    (bundle / "apt").mkdir(parents=True)
+    (bundle / "wheels").mkdir()
     _write_cfg(cfg, bundle={"local_dir": str(bundle)})
     res = subprocess.run(
         ["bash", str(SCRIPT), "cli-takes-precedence@elsewhere", "--config", str(cfg), "--dry-run"],
@@ -83,7 +84,8 @@ def test_missing_config_fails(tmp_path: Path):
 def test_yaml_with_model_mode_rsync(tmp_path: Path):
     cfg = tmp_path / "deploy.yaml"
     bundle = tmp_path / "bundle"
-    (bundle / "apt").mkdir(parents=True); (bundle / "wheels").mkdir()
+    (bundle / "apt").mkdir(parents=True)
+    (bundle / "wheels").mkdir()
     model_local = tmp_path / "model"
     model_local.mkdir()
     _write_cfg(cfg,

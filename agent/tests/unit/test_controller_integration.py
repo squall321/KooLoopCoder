@@ -11,7 +11,6 @@ import json
 from pathlib import Path
 from typing import Any
 
-import pytest
 
 from loopcoder.config import LoopCoderConfig
 from loopcoder.llm.client import LlmResponse, LlmToolCall
@@ -168,12 +167,13 @@ def test_controller_fails_after_max_iter(tmp_path: Path):
     plan = load_plan(plan_path)
 
     # All responses write unrelated content
-    bad = lambda i: LlmResponse(
-        content=f"bad {i}",
-        tool_calls=[LlmToolCall(id=f"c{i}", name="write_file",
-                                arguments=json.dumps({"path": "other.txt", "content": "no\n"}))],
-        prompt_tokens=10, completion_tokens=5,
-    )
+    def bad(i):
+        return LlmResponse(
+            content=f"bad {i}",
+            tool_calls=[LlmToolCall(id=f"c{i}", name="write_file",
+                                    arguments=json.dumps({"path": "other.txt", "content": "no\n"}))],
+            prompt_tokens=10, completion_tokens=5,
+        )
     client = MockLlmClient([bad(1), bad(2), bad(3), bad(4)])
 
     cfg = _config(tmp_path)

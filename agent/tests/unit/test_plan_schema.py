@@ -6,12 +6,7 @@ import yaml
 from loopcoder.plan import load_plan
 from loopcoder.plan.schema import (
     Plan,
-    Goal,
-    PlanProject,
     ShellAcceptance,
-    FileExistsAcceptance,
-    FileContainsAcceptance,
-    HttpAcceptance,
 )
 
 

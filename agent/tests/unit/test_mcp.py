@@ -3,7 +3,6 @@
 import asyncio
 from pathlib import Path
 
-import pytest
 
 from loopcoder.mcp.server import build_mcp_server
 

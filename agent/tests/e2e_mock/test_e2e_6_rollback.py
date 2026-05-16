@@ -80,7 +80,6 @@ def test_e2e6_rollback_restores_workspace(run_controller, make_workspace):
     # After rollback to first_pass tag, the junk files written between rollbacks
     # are GONE. (Because the tag was created right after first_pass, and
     # rollback hard-resets to it.)
-    leftover_trash = list(ws.glob("trash_*.tmp"))
     # We accept any state where at least one rollback happened; the controller
     # may emit further failing responses afterwards which create new trash. But
     # iterations recorded must be <= max_iter and the first_pass tag must

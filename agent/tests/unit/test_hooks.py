@@ -5,8 +5,8 @@ from pathlib import Path
 import pytest
 
 from loopcoder.tools.base import ToolContext, ToolError, ToolResult
-from loopcoder.tools.hooks import HookRegistry, default_hooks
-from loopcoder.tools.registry import ToolRegistry, default_registry
+from loopcoder.tools.hooks import HookRegistry
+from loopcoder.tools.registry import default_registry
 
 
 def _ctx(tmp_path: Path) -> ToolContext:

@@ -1,13 +1,10 @@
 """Tests for config loading + YAML merge."""
 
-import os
-from pathlib import Path
 
 import pytest
 
 from loopcoder.config import (
     LoopCoderConfig,
-    InstallConfig,
     VllmConfig,
     deep_merge,
     expand_env_vars,

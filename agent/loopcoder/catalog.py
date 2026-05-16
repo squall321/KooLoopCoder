@@ -151,3 +151,9 @@ def recommend_cli() -> int:
             if m.notes:
                 print(f"    note: {m.notes}")
     return 0
+
+
+if __name__ == "__main__":
+    import sys
+
+    sys.exit(recommend_cli())

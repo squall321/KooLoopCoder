@@ -1,6 +1,5 @@
 """Tests for the Verifier (acceptance executor)."""
 
-import os
 from pathlib import Path
 
 from loopcoder.loop.verifier import Verifier

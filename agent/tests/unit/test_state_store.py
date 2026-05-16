@@ -65,7 +65,8 @@ def test_todos_upsert_and_clear(tmp_path: Path):
 def test_list_sessions_orders_recent_first(tmp_path: Path):
     s = SessionStore(tmp_path / "s.db")
     a = s.start_session(plan_path="a")
-    import time as _t; _t.sleep(0.01)
+    import time as _t
+    _t.sleep(0.01)
     b = s.start_session(plan_path="b")
     sessions = s.list_sessions()
     assert sessions[0]["id"] == b

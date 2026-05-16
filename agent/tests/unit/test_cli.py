@@ -1,9 +1,7 @@
 """CLI smoke tests using click.testing."""
 
-import json
 from pathlib import Path
 
-import pytest
 from click.testing import CliRunner
 
 from loopcoder import __version__

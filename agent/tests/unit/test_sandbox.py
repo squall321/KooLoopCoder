@@ -1,6 +1,5 @@
 """Tests for Sandbox backends."""
 
-import shutil
 from pathlib import Path
 
 import pytest

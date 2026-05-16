@@ -1,6 +1,5 @@
 """Tests for plan topological ordering."""
 
-import pytest
 
 from loopcoder.plan import topological_order
 from loopcoder.plan.schema import Plan

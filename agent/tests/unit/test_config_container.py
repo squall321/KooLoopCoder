@@ -2,9 +2,6 @@
 
 from pathlib import Path
 
-import pytest
-import yaml
-
 from loopcoder.config import ContainerConfig, load_install_config
 
 
@@ -27,7 +24,6 @@ def test_container_with_suite_image():
 def test_install_yaml_example_loads(tmp_path: Path):
     """The shipped example must parse cleanly through the new schema."""
     src = Path(__file__).resolve().parents[3] / "config" / "install.yaml.example"
-    raw = yaml.safe_load(src.read_text())
     cfg = load_install_config(src)
     assert cfg.container.store_dir == "/opt/apptainers"
     assert cfg.container.current_dir == "/opt/apptainers/current"

@@ -2,7 +2,6 @@
 
 from pathlib import Path
 
-import pytest
 
 from loopcoder.state.snapshot import SnapshotManager
 

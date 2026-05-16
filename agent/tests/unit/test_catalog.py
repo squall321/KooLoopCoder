@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from loopcoder.catalog import Catalog, CatalogModel, HardwareProfile, load_catalog
+from loopcoder.catalog import Catalog, load_catalog
 
 
 def test_catalog_loads():
@@ -82,7 +82,8 @@ def test_select_model_unknown_profile_exits_nonzero(monkeypatch, capsys):
 
 
 def test_select_model_json_mode(monkeypatch, capsys):
-    import json, sys
+    import json
+    import sys
     from loopcoder.catalog import recommend_cli
 
     monkeypatch.setattr(sys, "argv", ["x", "b300x8", "--json"])
@@ -95,7 +96,8 @@ def test_select_model_json_mode(monkeypatch, capsys):
 
 
 def test_select_model_list_returns_more_than_one(monkeypatch, capsys):
-    import json, sys
+    import json
+    import sys
     from loopcoder.catalog import recommend_cli
 
     monkeypatch.setattr(sys, "argv", ["x", "b300x8", "--list", "--json"])
