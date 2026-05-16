@@ -12,10 +12,18 @@
 #   sudo bash setup.sh --bundle /models           # bundle root override
 #   sudo bash setup.sh --stage 7                  # resume from a specific stage
 #   sudo bash setup.sh --skip-gpu-stages          # for Test VM (no GPU)
-#   sudo bash setup.sh --skip-model-stage         # already staged
+#   sudo bash setup.sh --skip-model-stage         # already packed
+#   sudo bash setup.sh --model-src DIR            # unpacked model dir to pack
 #   sudo bash setup.sh --dry-run                  # plan only
 #   sudo bash setup.sh --reinstall                # remove markers, redo all
 #   sudo bash setup.sh --uninstall                # tear down
+#
+# SIF-only model: an unpacked HuggingFace model directory (--model-src,
+# typically rsynced in by the Windows deploy step) is packed into a
+# read-only model.sif via scripts/pack-model.sh and installed alongside
+# the other SIFs under /opt/apptainers/. The host needs apptainer only;
+# no Python venv / wheels are installed (the agent lives in
+# loopcoder-suite.sif).
 
 set -euo pipefail
 
@@ -44,6 +52,7 @@ UNINSTALL=0
 SKIP_GPU=0
 SKIP_MODEL=0
 START_STAGE=0
+MODEL_SRC="${MODEL_SRC:-}"
 TEST_MODE=${LOOPCODER_TEST_MODE:-0}
 
 while [[ $# -gt 0 ]]; do
@@ -51,6 +60,7 @@ while [[ $# -gt 0 ]]; do
         --bundle) BUNDLE_ROOT="$2"; shift 2 ;;
         --config) LOOPCODER_YAML="$2"; shift 2 ;;
         --stage) START_STAGE="$2"; shift 2 ;;
+        --model-src) MODEL_SRC="$2"; shift 2 ;;
         --skip-gpu-stages) SKIP_GPU=1; shift ;;
         --skip-model-stage) SKIP_MODEL=1; shift ;;
         --dry-run) DRY_RUN=1; shift ;;
@@ -136,7 +146,10 @@ stage_0_preflight() {
     [[ "$ID" == "ubuntu" ]] || fail "unsupported OS: $ID"
     [[ "${VERSION_ID:0:5}" == "24.04" ]] || fail "unsupported Ubuntu version: $VERSION_ID (need 24.04)"
     [[ -d "$BUNDLE_ROOT" ]] || fail "bundle not found at $BUNDLE_ROOT"
-    [[ -f "$BUNDLE_ROOT/manifest.yaml" ]] || fail "manifest.yaml missing in $BUNDLE_ROOT"
+    # SIF-only bundles ship manifest.sha256 only; legacy VM bundles also
+    # carry manifest.yaml. Accept either as proof of a real bundle.
+    [[ -f "$BUNDLE_ROOT/manifest.yaml" || -f "$BUNDLE_ROOT/manifest.sha256" ]] \
+        || fail "no manifest (.yaml or .sha256) in $BUNDLE_ROOT"
     note "OS: Ubuntu $VERSION_ID, kernel $(uname -r)"
     note "bundle root: $BUNDLE_ROOT"
     mkdir -p "$INSTALL_ROOT" "$MODEL_CACHE" "$LOG_DIR" "$STATE_DIR" "$ETC_DIR"
@@ -163,7 +176,6 @@ stage_1_hw_check() {
 
 # Stage 2 — manifest_verify
 stage_2_manifest_verify() {
-    [[ -f "$BUNDLE_ROOT/manifest.yaml" ]] || fail "manifest.yaml missing"
     if [[ -f "$BUNDLE_ROOT/manifest.sha256" ]]; then
         run "(cd '$BUNDLE_ROOT' && sha256sum -c manifest.sha256 --quiet)" \
             || fail "manifest checksum mismatch"
@@ -197,44 +209,80 @@ stage_4_apptainer() {
 }
 
 # Stage 5 — python_env
+# SIF-only: the agent + all Python deps live inside loopcoder-suite.sif.
+# A host venv is built ONLY if the legacy bundle still ships wheels/.
 stage_5_python_env() {
+    if [[ ! -d "$BUNDLE_ROOT/wheels" ]]; then
+        note "SIF-only bundle (no wheels/): host venv not needed; agent runs from loopcoder-suite.sif"
+        return 0
+    fi
     local venv="$INSTALL_ROOT/venv"
     if [[ ! -x "$venv/bin/python" ]]; then
         run "python3.12 -m venv '$venv'"
     fi
-    if [[ -d "$BUNDLE_ROOT/wheels" ]]; then
-        run "'$venv/bin/pip' install --no-index --find-links '$BUNDLE_ROOT/wheels' --upgrade pip wheel setuptools"
-    fi
+    run "'$venv/bin/pip' install --no-index --find-links '$BUNDLE_ROOT/wheels' --upgrade pip wheel setuptools"
     note "python: $('$venv/bin/python' --version)"
 }
 
-# Stage 6 — agent_deps + loopcoder install
+# Stage 6 — agent_deps + loopcoder install (legacy wheel path only)
 stage_6_agent_deps() {
-    local venv="$INSTALL_ROOT/venv"
-    if [[ -d "$BUNDLE_ROOT/wheels" ]]; then
-        run "'$venv/bin/pip' install --no-index --find-links '$BUNDLE_ROOT/wheels' \
-            pydantic pyyaml jinja2 openai tiktoken rich click GitPython sqlalchemy tenacity platformdirs httpx"
+    if [[ ! -d "$BUNDLE_ROOT/wheels" ]]; then
+        note "SIF-only bundle: skipping host pip install"
+        return 0
     fi
+    local venv="$INSTALL_ROOT/venv"
+    run "'$venv/bin/pip' install --no-index --find-links '$BUNDLE_ROOT/wheels' \
+        pydantic pyyaml jinja2 openai tiktoken rich click GitPython sqlalchemy tenacity platformdirs httpx"
     if [[ -d "$BUNDLE_ROOT/source/LoopCoder" ]]; then
         run "'$venv/bin/pip' install --no-index --find-links '$BUNDLE_ROOT/wheels' --no-build-isolation '$BUNDLE_ROOT/source/LoopCoder'"
     fi
     note "loopcoder: $('$venv/bin/loopcoder' --version)"
 }
 
-# Stage 7 — model_stage
+# Stage 7 — model_stage (SIF-only: pack the unpacked model dir into model.sif)
+#
+# The Windows deploy step rsyncs an unpacked HF model directory to the
+# target (--model-src, default /scratch/models/<leaf>). Here we pack it
+# into a single read-only model.sif via scripts/pack-model.sh and install
+# it under /opt/apptainers/ with a stable 'model.sif' symlink, mirroring
+# how the other SIFs are staged in stage 8. vLLM bind-mounts it at /model.
 stage_7_model_stage() {
     if [[ $SKIP_MODEL -eq 1 ]]; then
-        note "--skip-model-stage: skipping"
+        note "--skip-model-stage: model.sif assumed already installed"
         return 0
     fi
-    local src dst
-    src="$(awk -F': *' '/^  source_path:/{print $2; exit}' "$INSTALL_YAML" | tr -d '\"')"
-    dst="$(awk -F': *' '/^  destination_path:/{print $2; exit}' "$INSTALL_YAML" | tr -d '\"')"
-    [[ -d "$src" ]] || fail "model source not found: $src"
-    mkdir -p "$dst"
-    run "rsync -a --info=progress2 '$src/' '$dst/'"
-    [[ -f "$dst/config.json" ]] || fail "config.json missing in $dst"
-    note "model staged at $dst"
+
+    local src
+    src="$MODEL_SRC"
+    if [[ -z "$src" ]]; then
+        # Fall back to install.yaml's source_path for legacy callers.
+        src="$(awk -F': *' '/^  source_path:/{print $2; exit}' "$INSTALL_YAML" | tr -d '\"')"
+    fi
+    [[ -n "$src" ]] || fail "no model source (pass --model-src DIR)"
+    [[ -d "$src" ]] || fail "model source dir not found: $src"
+    [[ -f "$src/config.json" ]] || fail "config.json missing in $src (not an unpacked HF model dir?)"
+
+    local store="${SIF_STORE_DIR:-/opt/apptainers}"
+    local current="${SIF_CURRENT_DIR:-${store}/current}"
+    mkdir -p "$store" "$current"
+
+    local leaf ver_sif
+    leaf="$(basename "$src")"
+    ver_sif="$store/model-${leaf}.sif"
+
+    local packer="${SOURCE_DIR:-$BUNDLE_ROOT/source/LoopCoder}/scripts/pack-model.sh"
+    [[ -f "$packer" ]] || packer="$(dirname "$0")/scripts/pack-model.sh"
+    [[ -f "$packer" ]] || fail "pack-model.sh not found"
+
+    if [[ -f "$ver_sif" && $REINSTALL -eq 0 ]]; then
+        note "model.sif already built: $ver_sif"
+    else
+        note "packing $src -> $ver_sif (this can take a while for large models)"
+        run "bash '$packer' '$src' '$ver_sif'"
+    fi
+    run "chmod 644 '$ver_sif'"
+    run "ln -sfn '$(basename "$ver_sif")' '$current/model.sif'"
+    note "model staged: $current/model.sif -> $(basename "$ver_sif")"
 }
 
 # Stage 8 — vllm_image / sandbox / suite — install into /opt/apptainers/
@@ -282,7 +330,6 @@ stage_9_systemd_unit() {
     local env_file="$ETC_DIR/vllm.env"
     {
         echo "# autogenerated from $VLLM_YAML"
-        echo "MODEL_DIR=$(awk -F': *' '/^  destination_path:/{print $2; exit}' "$INSTALL_YAML" | tr -d '\"')"
         echo "TENSOR_PARALLEL_SIZE=$(awk -F': *' '/^  tensor_parallel_size:/{print $2; exit}' "$VLLM_YAML")"
         echo "MAX_MODEL_LEN=$(awk -F': *' '/^  max_model_len:/{print $2; exit}' "$VLLM_YAML")"
         echo "GPU_MEMORY_UTILIZATION=$(awk -F': *' '/^  gpu_memory_utilization:/{print $2; exit}' "$VLLM_YAML")"
@@ -302,11 +349,10 @@ stage_9_systemd_unit() {
     [[ -f "$tmpl" ]] || tmpl="$(dirname "$0")/systemd/vllm.service.template"
     [[ -f "$tmpl" ]] || fail "vllm.service.template not found"
 
-    local model_dir
-    model_dir="$(awk -F': *' '/^  destination_path:/{print $2; exit}' "$INSTALL_YAML" | tr -d '\"')"
-
     local current="${SIF_CURRENT_DIR:-/opt/apptainers/current}"
-    sed -e "s#@MODEL_DIR@#$model_dir#g" \
+    local model_sif="$current/model.sif"
+
+    sed -e "s#@MODEL_SIF@#$model_sif#g" \
         -e "s#@USER@#$LOOPCODER_USER#g" \
         -e "s#@GROUP@#$LOOPCODER_GROUP#g" \
         -e "s#@ETC_DIR@#$ETC_DIR#g" \
@@ -389,12 +435,32 @@ stage_11_smoke_test() {
     note "smoke OK"
 }
 
-# Stage 12 — agent_install (CLI symlink)
+# Stage 12 — agent_install (CLI)
+# SIF-only: /usr/local/bin/loopcoder is a thin wrapper that execs the CLI
+# inside loopcoder-suite.sif. Legacy wheel path: symlink the venv binary.
 stage_12_agent_install() {
     local venv="$INSTALL_ROOT/venv"
-    [[ -x "$venv/bin/loopcoder" ]] || fail "loopcoder CLI missing"
-    run "ln -sf '$venv/bin/loopcoder' /usr/local/bin/loopcoder"
-    note "loopcoder: $(/usr/local/bin/loopcoder --version)"
+    if [[ -x "$venv/bin/loopcoder" ]]; then
+        run "ln -sf '$venv/bin/loopcoder' /usr/local/bin/loopcoder"
+        note "loopcoder (venv): $(/usr/local/bin/loopcoder --version)"
+        return 0
+    fi
+    local current="${SIF_CURRENT_DIR:-/opt/apptainers/current}"
+    local suite="$current/loopcoder-suite.sif"
+    [[ -e "$suite" ]] || fail "loopcoder-suite.sif not staged at $suite"
+    if [[ $DRY_RUN -eq 0 ]]; then
+        cat > /usr/local/bin/loopcoder <<EOF
+#!/usr/bin/env bash
+# Auto-generated by setup.sh — run the loopcoder CLI from the suite SIF.
+exec apptainer exec \\
+    --bind ${WORKSPACES_DIR:-/scratch/workspaces}:/workspaces \\
+    --bind ${STATE_DIR}:/state \\
+    --bind ${ETC_DIR}:/etc/loopcoder:ro \\
+    "$suite" loopcoder "\$@"
+EOF
+        chmod 755 /usr/local/bin/loopcoder
+    fi
+    note "loopcoder (suite.sif wrapper): $(/usr/local/bin/loopcoder --version 2>/dev/null || echo 'installed')"
 }
 
 # Stage 13 — summary

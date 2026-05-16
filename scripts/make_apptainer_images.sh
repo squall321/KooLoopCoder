@@ -18,4 +18,12 @@ build() {
 build "$DEFS/vllm.def" vllm.sif
 build "$DEFS/loopcoder-sandbox.def" loopcoder-sandbox.sif
 
+# loopcoder-suite.def uses relative %files paths and an embedded wheelhouse,
+# so it can't go through the simple build() above. Delegate to the existing
+# collector, which handles CWD + wheelhouse staging. WHEELS_DIR is optional;
+# if unset/empty the suite %post falls back to PyPI (needs internet).
+REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." &>/dev/null && pwd)"
+echo "==> $DEFS/loopcoder-suite.def -> $OUT/loopcoder-suite.sif"
+bash "$REPO_ROOT/bundle/in_vm/collect_loopcoder_suite.sh" "$OUT" "$REPO_ROOT"
+
 echo "Images at $OUT"

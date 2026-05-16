@@ -40,3 +40,7 @@ package-lock.json
 
 # bkit auto-generated state
 .bkit/
+
+# SIF bundle build artifacts (scripts/build-sif-bundle.sh)
+output/sif-bundle/
+bundle/win-tools-cache/

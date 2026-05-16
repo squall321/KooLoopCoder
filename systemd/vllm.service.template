@@ -2,16 +2,15 @@
 Description=LoopCoder vLLM Inference Server (Apptainer)
 After=network-online.target
 Wants=network-online.target
-RequiresMountsFor=@MODEL_DIR@
 
 [Service]
 Type=simple
 User=@USER@
 Group=@GROUP@
 EnvironmentFile=@ETC_DIR@/vllm.env
-ExecStartPre=/bin/bash -c 'test -f "${MODEL_DIR}/config.json" || (echo "model config.json not found at ${MODEL_DIR}" >&2; exit 1)'
+ExecStartPre=/bin/bash -c 'test -f "@MODEL_SIF@" || (echo "model.sif not found at @MODEL_SIF@" >&2; exit 1)'
 ExecStart=/usr/bin/apptainer run --nv \
-  --bind ${MODEL_DIR}:/model:ro \
+  --bind @MODEL_SIF@:/model:image-src=/ \
   --bind @CACHE_DIR@:/cache \
   --env HF_HUB_OFFLINE=${HF_HUB_OFFLINE} \
   --env TRANSFORMERS_OFFLINE=${TRANSFORMERS_OFFLINE} \

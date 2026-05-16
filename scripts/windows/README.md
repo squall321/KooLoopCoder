@@ -1,15 +1,18 @@
 # LoopCoder — Windows scripts
 
-PowerShell + .bat helpers for the **Windows-mediated deploy workflow**:
-the Windows PC has internet, the Linux GPU server (B300) does not.
-Windows downloads the model + builds the offline bundle (via WSL2),
-then pushes everything to the Linux box and runs the install remotely.
+PowerShell + .bat helpers for the **Windows-mediated deploy workflow**
+(SIF-only, **no WSL2**): the Windows PC has internet, the Linux GPU
+server (B300) does not. The SIF bundle is built once on a Linux host
+(`scripts/build-sif-bundle.sh`) and backed up to Windows. Windows
+downloads the HF model and pushes bundle + model to the offline B300
+using the cwRsync shipped inside the bundle, then runs setup.sh
+remotely. **Nothing is built on Windows.**
 
 End-to-end: see `docs/manuals/windows-mediated-deploy.md`.
 
 | File | Purpose |
 |---|---|
-| **`Deploy-To-Linux.ps1`** ★ | **One-command end-to-end deploy.** Picks model from catalog, downloads from HF, builds bundle in WSL2, rsyncs to Linux, runs setup.sh remotely. |
+| **`Deploy-To-Linux.ps1`** ★ | **One-command deploy of a pre-built SIF bundle.** Picks model from catalog, downloads from HF, transfers bundle+model with the bundled cwRsync (no WSL2), runs setup.sh remotely. Requires `-BundleDir`. |
 | `Download-Model.ps1` | Downloads a HuggingFace model with `huggingface_hub` + `hf_transfer`. NTFS-friendly. Resumable. Used internally by Deploy-To-Linux.ps1 or standalone. |
 | `Download-Model.bat` | Double-clickable launcher around `Download-Model.ps1`. Modes: default (B300 model), `tiny`, `custom`. |
 | `Verify-Model.ps1` | Standalone model directory verifier. Checks `config.json`, tokenizer, shard count/size, optionally SHA256. |
@@ -42,18 +45,16 @@ Download-Model.bat tiny                      :: tiny model
 Download-Model.bat custom Qwen/Qwen2.5-Coder-1.5B-Instruct D:\loopcoder\models
 ```
 
-## Move to the Linux build host
+## How the model reaches the B300
 
-When the download finishes, copy the directory into your Linux build
-host's bundle folder so `bundle.sh --skip-model` can pick it up:
+You normally don't move the model by hand — `Deploy-To-Linux.ps1`
+transfers the downloaded directory to the target with the bundled
+cwRsync, and `setup.sh` on the B300 packs it into a single read-only
+`model.sif`. The standalone `Download-Model.ps1` is only needed when you
+want to pre-fetch the model separately (then pass `-ModelDir ... -SkipModelDownload`).
 
-```
-LoopCoder/output/bundle/models/<MODEL_LEAF>/
-```
-
-Recommended path: external NVMe via `robocopy`, then `rsync -a` on Linux.
-The full procedure is documented in
-`LoopCoder/docs/manuals/model-download-windows.md`.
+The full end-to-end procedure is in
+`LoopCoder/docs/manuals/windows-mediated-deploy.md`.
 
 ## What the script protects against
 

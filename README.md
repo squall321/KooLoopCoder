@@ -66,15 +66,17 @@ Detailed onboarding: see [`HANDOFF.md`](HANDOFF.md), planning at
 | `agent/loopcoder/` | Python package: agent core, HTTP API, MCP server, CLI |
 | `agent/tests/` | 139 unit + mock-E2E tests (run with `pytest agent/tests/`) |
 | `containers/*.def` | Apptainer recipes for vllm / suite / sandbox SIFs |
-| `bundle.sh` + `bundle/` | Bundle builder using a 24.04 KVM VM (offline target ready) |
-| `setup.sh` | Offline 14-stage installer for the GPU host |
+| `scripts/build-sif-bundle.sh` ★ | **SIF-only bundle builder — no VM, no WSL2.** Builds the 3 SIFs + source + cwRsync directly on a Linux host with apptainer |
+| `bundle.sh` + `bundle/` | Legacy bundle builder using a 24.04 KVM VM (ships apt/.deb + wheels) |
+| `setup.sh` | Offline staged installer for the GPU host (SIF-only or legacy bundle) |
 | `test_setup.sh` + `bundle/test_vm/` | No-internet, no-GPU Test VM that re-runs setup.sh and asserts post-conditions |
+| `scripts/pack-model.sh` | Pack an unpacked HF model dir into a single read-only `model.sif` |
 | `scripts/upgrade-suite.sh` | Atomic SIF upgrade: `cp` + `ln -sfn` + `systemctl restart` |
-| `scripts/windows/` | PowerShell + .bat for downloading huge models on Windows |
+| `scripts/windows/` | PowerShell deploy (SIF-only, no WSL2) + HF model download |
 | `vscode-extension/` | TypeScript VS Code / Cursor / Windsurf extension |
 | `config/*.yaml.example` | Pydantic-validated config templates |
 | `examples/` | Demo plans: `plan_simple`, `plan_refactor`, `plan_fastapi_hello`, `tiny-end-to-end.sh` |
-| `docs/manuals/` | `model-download-windows.md`, `remote-ssh-workflow.md` |
+| `docs/manuals/` | `windows-mediated-deploy.md` (SIF-only), `remote-ssh-workflow.md`, `model-download-windows.md` |
 
 ---
 
