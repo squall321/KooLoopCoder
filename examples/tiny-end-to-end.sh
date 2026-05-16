@@ -47,6 +47,20 @@ LOOPCODER="$PROJECT_ROOT/.venv/bin/loopcoder"
 VLLM_BACKEND="${VLLM_BACKEND:-sif}"           # sif | pip
 VLLM_SIF_PATH="${VLLM_SIF_PATH:-/opt/apptainers/current/vllm.sif}"
 
+# Blackwell (sm_120, e.g. RTX 50-series) workaround: FlashInfer's JIT
+# arch check misfires when TORCH_CUDA_ARCH_LIST is unset and raises the
+# misleading "requires sm75 or higher". Pin the arch and use the
+# PyTorch-native sampler. Harmless on other GPUs. Override TORCH_ARCH if
+# your GPU differs (e.g. "9.0" for Hopper) or clear it to disable.
+TORCH_ARCH="${TORCH_ARCH:-12.0}"
+export TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST:-$TORCH_ARCH}"
+export VLLM_USE_FLASHINFER_SAMPLER="${VLLM_USE_FLASHINFER_SAMPLER:-0}"
+
+# LoopCoder drives the model via OpenAI tool-calling, so vLLM must run
+# with auto tool choice + a parser. hermes works for Qwen2.5-Coder.
+VLLM_TOOL_PARSER="${VLLM_TOOL_PARSER:-hermes}"
+VLLM_MAX_MODEL_LEN="${VLLM_MAX_MODEL_LEN:-16384}"
+
 # 1) Ensure huggingface_hub is available so we can fetch the tiny model.
 if ! "$VENV_PY" -c 'import huggingface_hub' 2>/dev/null; then
     echo "[tiny-e2e] installing huggingface_hub + hf_transfer into venv"
@@ -97,9 +111,11 @@ elif [[ "$VLLM_BACKEND" == "sif" ]]; then
             --served-model-name "$MODEL_ID" \
             --host 127.0.0.1 \
             --port "$VLLM_PORT" \
-            --max-model-len 8192 \
+            --max-model-len "$VLLM_MAX_MODEL_LEN" \
             --gpu-memory-utilization 0.5 \
             --enable-prefix-caching \
+            --enable-auto-tool-choice \
+            --tool-call-parser "$VLLM_TOOL_PARSER" \
         > "$LOG_DIR/vllm.log" 2>&1 &
     echo $! > "$PIDFILE"
     sleep 1
@@ -111,9 +127,11 @@ else
         --served-model-name "$MODEL_ID" \
         --host 127.0.0.1 \
         --port "$VLLM_PORT" \
-        --max-model-len 8192 \
+        --max-model-len "$VLLM_MAX_MODEL_LEN" \
         --gpu-memory-utilization 0.5 \
         --enable-prefix-caching \
+        --enable-auto-tool-choice \
+        --tool-call-parser "$VLLM_TOOL_PARSER" \
         > "$LOG_DIR/vllm.log" 2>&1 &
     echo $! > "$PIDFILE"
     sleep 1
@@ -143,12 +161,14 @@ llm:
   model: "$MODEL_ID"
   temperature: 0.2
   top_p: 0.95
-  max_completion_tokens: 1024
+  max_completion_tokens: 768
   request_timeout_sec: 120
 
 context:
-  total_budget_tokens: 6000
-  reserve_for_completion: 1024
+  # LoopCoder's system prompt + tool schemas are ~3k tokens; keep the
+  # budget well under VLLM_MAX_MODEL_LEN so tool results still fit.
+  total_budget_tokens: 12000
+  reserve_for_completion: 768
   always_pin: []
 
 sandbox:
