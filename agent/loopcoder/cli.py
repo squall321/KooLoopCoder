@@ -192,6 +192,28 @@ def serve(host: str, port: int, config_path: str | None) -> None:
     run_server(host=host, port=port, config_path=config_path)
 
 
+@main.command(name="select-model")
+@click.argument("profile")
+@click.option("--catalog", "catalog_path", default=None, help="Override catalog YAML.")
+@click.option("--list", "list_all", is_flag=True, default=False, help="List every fitting model.")
+@click.option("--json", "as_json", is_flag=True, default=False, help="Machine-readable output.")
+def select_model(profile: str, catalog_path: str | None, list_all: bool, as_json: bool) -> None:
+    """Recommend a model for a hardware profile (e.g. b300x8)."""
+    import sys
+    from loopcoder.catalog import recommend_cli
+    # delegate to the standalone recommender (it parses argv)
+    argv = [profile]
+    if catalog_path:
+        argv += ["--catalog", catalog_path]
+    if list_all:
+        argv += ["--list"]
+    if as_json:
+        argv += ["--json"]
+    sys.argv = ["loopcoder-select-model"] + argv
+    rc = recommend_cli()
+    sys.exit(rc)
+
+
 @main.command(name="mcp")
 @click.option("--transport", type=click.Choice(["stdio", "sse"]), default="stdio", show_default=True)
 @click.option("--host", default="127.0.0.1", show_default=True)

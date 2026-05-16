@@ -1,0 +1,157 @@
+# Known good models, sorted by approximate VRAM footprint at the listed
+# quantization. The "selector" tool reads this to recommend the largest
+# model that fits a given hardware profile.
+#
+# approx_vram_gb is the weights footprint only. Add KV cache + activation
+# headroom (~20%). Practical fit rule: approx_vram_gb < total_vram_gb * 0.85.
+#
+# For NVIDIA B300 × 8 with 0.92 GPU memory utilization the effective
+# budget is ≈ 2120 GiB, leaving plenty of room even for 1T-scale MoE.
+#
+# Note: HuggingFace IDs change. Verify availability + license before use.
+
+hardware_profiles:
+  b300x8:
+    gpus: 8
+    per_gpu_gb: 288
+    total_vram_gb: 2304
+    practical_budget_gb: 1900   # weights + KV + activations + safety margin
+    notes: "Blackwell Ultra, HBM3e 288 GB × 8."
+
+  b300x4:
+    gpus: 4
+    per_gpu_gb: 288
+    total_vram_gb: 1152
+    practical_budget_gb: 950
+
+  h200x8:
+    gpus: 8
+    per_gpu_gb: 141
+    total_vram_gb: 1128
+    practical_budget_gb: 930
+
+  h100x8:
+    gpus: 8
+    per_gpu_gb: 80
+    total_vram_gb: 640
+    practical_budget_gb: 540
+
+  rtx_5070ti:
+    gpus: 1
+    per_gpu_gb: 16
+    total_vram_gb: 16
+    practical_budget_gb: 13
+    notes: "Dev box; tiny models only."
+
+# Models the selector considers. Order = roughly weakest → strongest.
+# `recommended_for`: list of hardware_profiles this fits comfortably.
+models:
+  - id: Qwen/Qwen2.5-Coder-0.5B-Instruct
+    params_b: 0.5
+    quant: bf16
+    approx_vram_gb: 1
+    license: apache-2.0
+    tp_default: 1
+    max_model_len: 32768
+    is_coder: true
+    recommended_for: [rtx_5070ti, h100x8, h200x8, b300x4, b300x8]
+    notes: "Smoke-test tier."
+
+  - id: Qwen/Qwen2.5-Coder-1.5B-Instruct
+    params_b: 1.5
+    quant: bf16
+    approx_vram_gb: 3
+    license: apache-2.0
+    tp_default: 1
+    max_model_len: 32768
+    is_coder: true
+    recommended_for: [rtx_5070ti, h100x8, h200x8, b300x4, b300x8]
+    notes: "Recommended sample for first-deploy validation (≤4 GB)."
+
+  - id: Qwen/Qwen2.5-Coder-7B-Instruct
+    params_b: 7
+    quant: bf16
+    approx_vram_gb: 14
+    license: apache-2.0
+    tp_default: 1
+    max_model_len: 32768
+    is_coder: true
+    recommended_for: [rtx_5070ti, h100x8, h200x8, b300x4, b300x8]
+
+  - id: Qwen/Qwen2.5-Coder-32B-Instruct
+    params_b: 32
+    quant: bf16
+    approx_vram_gb: 65
+    license: apache-2.0
+    tp_default: 2
+    max_model_len: 32768
+    is_coder: true
+    recommended_for: [h100x8, h200x8, b300x4, b300x8]
+
+  - id: Qwen/Qwen3-Coder-30B-A3B-Instruct
+    params_b: 30
+    active_b: 3
+    quant: bf16
+    approx_vram_gb: 60
+    license: apache-2.0
+    tp_default: 2
+    max_model_len: 131072
+    is_coder: true
+    is_moe: true
+    recommended_for: [h100x8, h200x8, b300x4, b300x8]
+
+  - id: meta-llama/Llama-3.3-70B-Instruct
+    params_b: 70
+    quant: bf16
+    approx_vram_gb: 140
+    license: llama-3-community
+    tp_default: 4
+    max_model_len: 131072
+    requires_hf_token: true
+    recommended_for: [h200x8, b300x4, b300x8]
+
+  - id: Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8
+    params_b: 480
+    active_b: 35
+    quant: fp8
+    approx_vram_gb: 480
+    license: apache-2.0
+    tp_default: 8
+    max_model_len: 262144
+    is_coder: true
+    is_moe: true
+    recommended_for: [b300x4, b300x8]
+    notes: "Top-tier coding model. Comfortable on B300 × 8 (≈ 480 / 1900 budget)."
+
+  - id: deepseek-ai/DeepSeek-V3.1
+    params_b: 671
+    active_b: 37
+    quant: fp8
+    approx_vram_gb: 671
+    license: deepseek
+    tp_default: 8
+    max_model_len: 163840
+    is_moe: true
+    recommended_for: [b300x8]
+    notes: "Larger reasoning + general. MoE 37B active per token."
+
+  - id: moonshotai/Kimi-K2-Instruct
+    params_b: 1000
+    active_b: 32
+    quant: fp8
+    approx_vram_gb: 1000
+    license: modified-mit
+    tp_default: 8
+    max_model_len: 131072
+    is_moe: true
+    recommended_for: [b300x8]
+    notes: "≈1 T params MoE. Fits B300 × 8 within budget. Bleeding-edge."
+
+# When the selector is asked for "the best model" without other hints,
+# this is the recommendation per profile.
+recommendations:
+  rtx_5070ti: Qwen/Qwen2.5-Coder-1.5B-Instruct
+  h100x8:    Qwen/Qwen2.5-Coder-32B-Instruct
+  h200x8:    Qwen/Qwen3-Coder-30B-A3B-Instruct
+  b300x4:    Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8
+  b300x8:    Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8

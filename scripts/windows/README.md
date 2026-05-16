@@ -1,14 +1,18 @@
-# LoopCoder — Windows download scripts
+# LoopCoder — Windows scripts
 
-Standalone PowerShell + .bat helpers for downloading large HuggingFace
-models on a Windows PC and validating them, in case the Linux build host
-isn't the best place to run a long bandwidth-bound download.
+PowerShell + .bat helpers for the **Windows-mediated deploy workflow**:
+the Windows PC has internet, the Linux GPU server (B300) does not.
+Windows downloads the model + builds the offline bundle (via WSL2),
+then pushes everything to the Linux box and runs the install remotely.
+
+End-to-end: see `docs/manuals/windows-mediated-deploy.md`.
 
 | File | Purpose |
 |---|---|
-| `Download-Model.ps1` | Downloads a HuggingFace model with `huggingface_hub` + `hf_transfer`. NTFS-friendly (`local_dir_use_symlinks=False`). Disables sleep + adds Defender exclusion while running. Resumable. |
-| `Download-Model.bat` | Double-clickable launcher around the .ps1 (sets ExecutionPolicy bypass for the session, auto-elevates UAC). Three modes: default (full B300 model), `tiny`, `custom`. |
-| `Verify-Model.ps1` | Standalone verifier. Checks `config.json`, tokenizer, shard count/size, optionally SHA256. |
+| **`Deploy-To-Linux.ps1`** ★ | **One-command end-to-end deploy.** Picks model from catalog, downloads from HF, builds bundle in WSL2, rsyncs to Linux, runs setup.sh remotely. |
+| `Download-Model.ps1` | Downloads a HuggingFace model with `huggingface_hub` + `hf_transfer`. NTFS-friendly. Resumable. Used internally by Deploy-To-Linux.ps1 or standalone. |
+| `Download-Model.bat` | Double-clickable launcher around `Download-Model.ps1`. Modes: default (B300 model), `tiny`, `custom`. |
+| `Verify-Model.ps1` | Standalone model directory verifier. Checks `config.json`, tokenizer, shard count/size, optionally SHA256. |
 
 ## Quick start
 

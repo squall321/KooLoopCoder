@@ -37,3 +37,6 @@ package-lock.json
 
 # Local dev configs
 /tmp/lc-dev/
+
+# bkit auto-generated state
+.bkit/
