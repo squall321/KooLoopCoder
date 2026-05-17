@@ -1,0 +1,23 @@
+#!/bin/bash
+#SBATCH --job-name=loopcoder-aio
+#SBATCH --partition=@PARTITION@
+#SBATCH --gres=gpu:@GPUS@
+#SBATCH --cpus-per-task=@CPUS@
+#SBATCH --mem=@MEM@
+#SBATCH --time=@TIME@
+#SBATCH --output=@LOGS_DIR@/aio-%j.out
+#SBATCH --error=@LOGS_DIR@/aio-%j.err
+#
+# All-in-one LoopCoder job: bring up vLLM, run one plan against it,
+# then exit (releases the GPU allocation). No sudo / systemd — pure
+# apptainer driven by loopcoder-hpc.sh inside the allocation.
+#
+# Rendered by loopcoder-hpc.sh (sed-substitutes the AT-wrapped tokens).
+
+set -euo pipefail
+export LOOPCODER_HOME="@LOOPCODER_HOME@"
+export LOOPCODER_VLLM_PORT="@VLLM_PORT@"
+export LOOPCODER_MODEL="@MODEL_KEY@"
+
+echo "[aio] node=$(hostname) job=${SLURM_JOB_ID:-?} home=$LOOPCODER_HOME"
+bash "@HPC_SH@" _allinone-inproc "@PLAN@"

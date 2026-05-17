@@ -1,0 +1,27 @@
+#!/bin/bash
+#SBATCH --job-name=loopcoder-serve
+#SBATCH --partition=@PARTITION@
+#SBATCH --gres=gpu:@GPUS@
+#SBATCH --cpus-per-task=@CPUS@
+#SBATCH --mem=@MEM@
+#SBATCH --time=@TIME@
+#SBATCH --output=@LOGS_DIR@/serve-%j.out
+#SBATCH --error=@LOGS_DIR@/serve-%j.err
+#
+# Long-lived vLLM serving job. Stays up for the whole walltime; other
+# jobs / a login-node loopcoder talk to it at the printed node:port.
+# No sudo / systemd — apptainer driven by loopcoder-hpc.sh.
+#
+# Rendered by loopcoder-hpc.sh (sed-substitutes the AT-wrapped tokens).
+
+set -euo pipefail
+export LOOPCODER_HOME="@LOOPCODER_HOME@"
+export LOOPCODER_VLLM_PORT="@VLLM_PORT@"
+export LOOPCODER_MODEL="@MODEL_KEY@"
+
+NODE_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
+echo "[serve] node=$(hostname) ip=${NODE_IP:-?} port=@VLLM_PORT@ job=${SLURM_JOB_ID:-?}"
+echo "[serve] reach it at: http://${NODE_IP:-127.0.0.1}:@VLLM_PORT@/v1"
+echo "[serve] (set loopcoder.yaml llm.base_url accordingly, or SSH-tunnel)"
+
+bash "@HPC_SH@" _serve-inproc

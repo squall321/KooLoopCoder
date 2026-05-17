@@ -73,6 +73,7 @@ Detailed onboarding: see [`HANDOFF.md`](HANDOFF.md), planning at
 | `scripts/pack-model.sh` | Pack an unpacked HF model dir into a single read-only `model.sif` |
 | `scripts/fetch-models.sh` | One-touch fetch of every model in a deploy.yaml `models[]` + catalog resolve |
 | `systemd/vllm@.service.template` | Instanced unit: one `vllm@<key>` per model (multi-model serving) |
+| `scripts/hpc/` | HPC mode: Slurm `sbatch` job wrappers, no sudo/systemd, runs from `$LOOPCODER_HOME` |
 | `scripts/upgrade-suite.sh` | Atomic SIF upgrade: `cp` + `ln -sfn` + `systemctl restart` |
 | `scripts/windows/` | PowerShell deploy (SIF-only, no WSL2) + HF model download |
 | `vscode-extension/` | TypeScript VS Code / Cursor / Windsurf extension |
