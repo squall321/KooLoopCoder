@@ -385,6 +385,27 @@ stage_9_systemd_unit() {
         -e "s#@SYSTEMD_RESTART_SEC@#15#g" \
         "$tmpl" > /etc/systemd/system/vllm.service
 
+    # Render loopcoder.env — the suite SIF reads LOOPCODER_API_HOST/PORT
+    # (and the optional bearer key) from here via the unit's
+    # EnvironmentFile. Defaults expose the API on all interfaces:8765 so
+    # other servers can call it; tighten host or set a key by editing
+    # this one file (no rebuild). Existing file is preserved on reinstall.
+    local lc_env="$ETC_DIR/loopcoder.env"
+    if [[ ! -f "$lc_env" || $REINSTALL -eq 1 ]]; then
+        {
+            echo "# LoopCoder suite service config. Edit + 'systemctl restart loopcoder'."
+            echo "LOOPCODER_API_HOST=${LOOPCODER_API_HOST:-0.0.0.0}"
+            echo "LOOPCODER_API_PORT=${LOOPCODER_API_PORT:-8765}"
+            echo "LOOPCODER_MCP_HOST=${LOOPCODER_MCP_HOST:-0.0.0.0}"
+            echo "LOOPCODER_MCP_PORT=${LOOPCODER_MCP_PORT:-8766}"
+            echo "# Set a token to require 'Authorization: Bearer <token>'."
+            echo "LOOPCODER_API_KEY=${LOOPCODER_API_KEY:-}"
+        } > "$lc_env"
+        note "wrote $lc_env (API on ${LOOPCODER_API_HOST:-0.0.0.0}:${LOOPCODER_API_PORT:-8765})"
+    else
+        note "$lc_env exists; preserving (use --reinstall to regenerate)"
+    fi
+
     # Render loopcoder.service template (suite SIF) — optional but
     # standard in the new architecture.
     local suite_tmpl="${SOURCE_DIR:-$BUNDLE_ROOT/source/LoopCoder}/systemd/loopcoder.service.template"

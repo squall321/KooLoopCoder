@@ -76,17 +76,23 @@ From: python:3.12-slim-bookworm
 
 %runscript
     # Default entrypoint = HTTP API. systemd unit invokes this directly.
+    # Bind host/port come from the environment (set by systemd from
+    # loopcoder.env); fall back to all-interfaces:8765 when unset.
     exec loopcoder serve \
-        --host 0.0.0.0 \
-        --port 8765 \
+        --host "${LOOPCODER_API_HOST:-0.0.0.0}" \
+        --port "${LOOPCODER_API_PORT:-8765}" \
         --config "${LOOPCODER_YAML:-/etc/loopcoder/loopcoder.yaml}" \
         "$@"
 
 %apprun api
-    exec loopcoder serve --host 0.0.0.0 --port 8765
+    exec loopcoder serve \
+        --host "${LOOPCODER_API_HOST:-0.0.0.0}" \
+        --port "${LOOPCODER_API_PORT:-8765}"
 
 %apprun mcp
-    exec loopcoder mcp --transport sse --host 0.0.0.0 --port 8766
+    exec loopcoder mcp --transport sse \
+        --host "${LOOPCODER_MCP_HOST:-0.0.0.0}" \
+        --port "${LOOPCODER_MCP_PORT:-8766}"
 
 %apprun cli
     exec loopcoder "$@"

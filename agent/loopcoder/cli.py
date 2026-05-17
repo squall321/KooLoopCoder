@@ -182,14 +182,24 @@ def tokens(session_id: str) -> None:
 
 
 @main.command()
-@click.option("--host", default="127.0.0.1", show_default=True)
-@click.option("--port", default=8765, show_default=True, type=int)
+@click.option("--host", default=None,
+              help="Bind host. Default: $LOOPCODER_API_HOST or 127.0.0.1.")
+@click.option("--port", default=None, type=int,
+              help="Bind port. Default: $LOOPCODER_API_PORT or 8765.")
 @click.option("--config", "config_path", default=None,
               help="Override loopcoder.yaml path (else env LOOPCODER_YAML).")
-def serve(host: str, port: int, config_path: str | None) -> None:
-    """Start the HTTP API server (FastAPI/uvicorn)."""
+def serve(host: str | None, port: int | None, config_path: str | None) -> None:
+    """Start the HTTP API server (FastAPI/uvicorn).
+
+    Precedence: explicit flag > env (LOOPCODER_API_HOST/PORT) > default
+    (127.0.0.1:8765). The suite SIF passes the env, so systemd controls
+    the bind via loopcoder.env without rebuilding.
+    """
+    import os
+    eff_host = host or os.environ.get("LOOPCODER_API_HOST") or "127.0.0.1"
+    eff_port = port or int(os.environ.get("LOOPCODER_API_PORT") or 8765)
     from loopcoder.api import run_server
-    run_server(host=host, port=port, config_path=config_path)
+    run_server(host=eff_host, port=eff_port, config_path=config_path)
 
 
 @main.command(name="select-model")
@@ -233,12 +243,17 @@ def catalog_resolve(model_id: str, catalog_path: str | None, as_json: bool) -> N
 
 @main.command(name="mcp")
 @click.option("--transport", type=click.Choice(["stdio", "sse"]), default="stdio", show_default=True)
-@click.option("--host", default="127.0.0.1", show_default=True)
-@click.option("--port", default=8766, show_default=True, type=int)
-def mcp_serve(transport: str, host: str, port: int) -> None:
+@click.option("--host", default=None,
+              help="SSE bind host. Default: $LOOPCODER_MCP_HOST or 127.0.0.1.")
+@click.option("--port", default=None, type=int,
+              help="SSE bind port. Default: $LOOPCODER_MCP_PORT or 8766.")
+def mcp_serve(transport: str, host: str | None, port: int | None) -> None:
     """Run LoopCoder as an MCP server (stdio for Claude Desktop, sse for HTTP)."""
+    import os
+    eff_host = host or os.environ.get("LOOPCODER_MCP_HOST") or "127.0.0.1"
+    eff_port = port or int(os.environ.get("LOOPCODER_MCP_PORT") or 8766)
     from loopcoder.mcp import run_mcp_server
-    run_mcp_server(transport=transport, host=host, port=port)
+    run_mcp_server(transport=transport, host=eff_host, port=eff_port)
 
 
 @main.command()
