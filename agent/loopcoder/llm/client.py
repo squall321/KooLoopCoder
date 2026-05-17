@@ -144,6 +144,33 @@ class LlmClient:
                 )
             )
 
+        # Fallback: small/quantized models often emit the tool call as
+        # fenced/tagged JSON in `content` instead of structured tool_calls,
+        # which vLLM's parser then drops. Recover it so the loop can act.
+        if not tool_calls and tools_list and msg.content:
+            from loopcoder.llm.tool_fallback import extract_tool_calls
+
+            allowed = {
+                t.get("function", {}).get("name")
+                for t in tools_list
+                if t.get("function", {}).get("name")
+            }
+            for i, rec in enumerate(extract_tool_calls(msg.content, allowed)):
+                tool_calls.append(
+                    LlmToolCall(
+                        id=f"fallback-{i}",
+                        name=rec["name"],
+                        arguments=rec["arguments"],
+                    )
+                )
+            if tool_calls:
+                log.warning(
+                    "recovered %d tool call(s) from content fallback "
+                    "(model %s did not return structured tool_calls)",
+                    len(tool_calls),
+                    self.model,
+                )
+
         return LlmResponse(
             content=msg.content,
             tool_calls=tool_calls,
