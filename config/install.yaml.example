@@ -12,14 +12,28 @@ paths:
   log_dir: /var/log/loopcoder
   state_dir: /var/lib/loopcoder
 
+# --- Multi-model (preferred) ---------------------------------------
+# One vllm@<key> systemd instance is created per entry, each on its own
+# port. Serving params (quant / tp / max_len / tool parser) are resolved
+# from the catalog by model id. Mirrors deploy.yaml's models[] so the
+# operator edits one list. LoopCoder talks to `default_model` unless a
+# plan/request overrides it. Omit this block to use single-model below.
+models:
+  - key: fast
+    id: Qwen/Qwen2.5-Coder-7B-Instruct-AWQ
+    port: 8001
+  - key: big
+    id: Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8
+    port: 8002
+default_model: fast
+
+# --- Single-model (legacy, used when `models:` is absent) ----------
 model:
   # The ONLY line you normally edit. Everything the model implies —
   # quantization, tensor-parallel size, max context length, and the
   # vLLM tool-call parser — is resolved automatically at install time
   # from the model catalog (config/model-catalog.yaml). Unknown repo
   # ids fall back to id-based heuristics (fp8/awq/gptq in the name).
-  # Model weights are transferred by the deploy step and packed into
-  # model.sif; you do not set source/destination paths here.
   id: "Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8"
   staging:
     verify_sha256: true

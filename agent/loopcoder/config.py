@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 # ---------- install.yaml ----------------------------------------------------------------
 
@@ -45,6 +45,18 @@ class ModelConfig(BaseModel):
     source_path: str | None = None
     destination_path: str | None = None
     staging: ModelStaging = ModelStaging()
+
+
+class ModelEntry(BaseModel):
+    """One model in a multi-model deployment.
+
+    Each entry becomes a vllm@<key> systemd instance on its own port.
+    Serving params are resolved from the catalog by `id` at install time.
+    """
+
+    key: str
+    id: str
+    port: int
 
 
 class ContainerConfig(BaseModel):
@@ -78,9 +90,30 @@ class SystemConfig(BaseModel):
 class InstallConfig(BaseModel):
     deployment: DeploymentConfig = DeploymentConfig()
     paths: PathsConfig = PathsConfig()
-    model: ModelConfig
+    # Multi-model (preferred): one vllm@<key> instance per entry.
+    models: list[ModelEntry] = Field(default_factory=list)
+    default_model: str | None = None
+    # Single-model (legacy): used when `models` is empty.
+    model: ModelConfig | None = None
     container: ContainerConfig
     system: SystemConfig = SystemConfig()
+
+    @model_validator(mode="after")
+    def _need_a_model(self) -> "InstallConfig":
+        if not self.models and self.model is None:
+            raise ValueError("install config needs either models[] or model")
+        if self.models:
+            keys = [m.key for m in self.models]
+            if len(keys) != len(set(keys)):
+                raise ValueError(f"duplicate model keys: {keys}")
+            ports = [m.port for m in self.models]
+            if len(ports) != len(set(ports)):
+                raise ValueError(f"duplicate model ports: {ports}")
+            if self.default_model and self.default_model not in keys:
+                raise ValueError(
+                    f"default_model {self.default_model!r} not in models {keys}"
+                )
+        return self
 
 
 # ---------- vllm.yaml ----------------------------------------------------------------
@@ -133,15 +166,47 @@ class LlmRetry(BaseModel):
     backoff_max_sec: float = 60.0
 
 
+class LlmEndpoint(BaseModel):
+    """One servable model: a vLLM instance's URL + served name.
+
+    In multi-model deployments each model key (matching install.yaml's
+    models[].key) maps to its own vllm@<key> instance on its own port.
+    """
+
+    base_url: str
+    model: str
+    api_key: str = "EMPTY"
+
+
 class LlmConfig(BaseModel):
     base_url: str = "http://127.0.0.1:8000/v1"
     api_key: str = "EMPTY"
     model: str = "Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8"
+    # Optional multi-model routing table: key -> endpoint. A plan can
+    # select one via `llm.model: <key>`; unknown values fall back to the
+    # single base_url/model above (treated as a literal served name).
+    models: dict[str, LlmEndpoint] = Field(default_factory=dict)
+    default_model: str | None = None
     temperature: float = 0.2
     top_p: float = 0.95
     max_completion_tokens: int = 8192
     request_timeout_sec: int = 600
     retry: LlmRetry = LlmRetry()
+
+    def resolve_endpoint(self, requested: str | None) -> tuple[str, str, str]:
+        """Return (base_url, model, api_key) for a requested model/key.
+
+        Precedence: explicit request key in models[] > default_model in
+        models[] > the flat base_url/model (request treated as a literal
+        served-model name when given).
+        """
+        key = requested or self.default_model
+        if key and key in self.models:
+            e = self.models[key]
+            return e.base_url, e.model, e.api_key
+        # Not a known key: keep single-endpoint behavior, honoring an
+        # explicit served-model name if the request was one.
+        return self.base_url, (requested or self.model), self.api_key
 
 
 class PreserveConfig(BaseModel):

@@ -50,6 +50,7 @@ param(
     [string]$Profile = "b300x8",      # hardware profile (config/model-catalog.yaml)
     [string]$ModelId = "",            # override catalog recommendation
     [string]$ModelDir = "",           # already-downloaded model dir; skip HF
+    [string]$ConfigYaml = "",         # deploy.yaml with models[] -> multi-model
     [string]$WorkDir  = "D:\loopcoder-work",
     [string]$RemoteBundle = "/models",
     [string]$RemoteModelDir = "",     # defaults to /scratch/models/<leaf>
@@ -105,10 +106,43 @@ if (-not $DryRun) {
     }
 }
 
-# ----------------- 2. pick model -----------------
+# ----------------- 2. pick model(s) -----------------
+
+# Multi-model path: -ConfigYaml deploy.yaml with a models[] list. Each
+# entry is downloaded and shipped to /scratch/models/<leaf>; setup.sh
+# (reading install.yaml's models[]) packs one model-<key>.sif each and
+# brings up vllm@<key>. $MultiModels = list of @{key;id;leaf;dir}.
+$MultiModels = @()
+if ($ConfigYaml -ne "") {
+    if (-not (Test-Path $ConfigYaml)) { Fail "ConfigYaml not found: $ConfigYaml" }
+    Write-Section "Multi-model selection ($ConfigYaml)"
+    $env:PYTHONPATH = "$repoInBundle\agent;$env:PYTHONPATH"
+    $py = @"
+import sys, yaml
+cfg = yaml.safe_load(open(sys.argv[1])) or {}
+for m in (cfg.get('models') or []):
+    k,i,p = m.get('key'), m.get('id'), m.get('port')
+    if k and i: print(f"{k}\t{i}")
+"@
+    $lines = & python -c $py $ConfigYaml 2>&1
+    if ($LASTEXITCODE -ne 0 -or -not $lines) {
+        Fail "no models[] in $ConfigYaml (raw: $lines)"
+    }
+    foreach ($ln in @($lines)) {
+        $parts = $ln -split "`t"
+        if ($parts.Count -lt 2) { continue }
+        $k = $parts[0]; $mid = $parts[1]; $leaf = ($mid -split "/")[-1]
+        $MultiModels += @{ key = $k; id = $mid; leaf = $leaf;
+                           dir = (Join-Path $ModelsRoot $leaf) }
+        Write-Host "  [$k] $mid" -ForegroundColor Green
+    }
+}
 
 Write-Section "Model selection"
-if ($ModelId -eq "" -and $ModelDir -eq "") {
+if ($MultiModels.Count -gt 0) {
+    Write-Step "multi-model: $($MultiModels.Count) model(s) from $ConfigYaml"
+}
+elseif ($ModelId -eq "" -and $ModelDir -eq "") {
     Write-Step "loopcoder.catalog $Profile --json (from bundled source)"
     if (-not $DryRun) {
         $env:PYTHONPATH = "$repoInBundle\agent;$env:PYTHONPATH"
@@ -129,9 +163,26 @@ if (-not $RemoteModelDir) {
     $RemoteModelDir = "/scratch/models/$modelLeaf"
 }
 
-# ----------------- 3. download model -----------------
+# ----------------- 3. download model(s) -----------------
 
-if ($ModelDir -eq "" -and -not $SkipModelDownload) {
+if ($MultiModels.Count -gt 0) {
+    Write-Section "Model download (multi)"
+    $dl = Join-Path $PSScriptRoot "Download-Model.ps1"
+    foreach ($m in $MultiModels) {
+        if (Test-Path (Join-Path $m.dir "config.json")) {
+            Write-Step "[$($m.key)] already present: $($m.dir) (skip)"
+            continue
+        }
+        Write-Step "[$($m.key)] Download-Model.ps1 -ModelId $($m.id)"
+        if (-not $DryRun) {
+            $params = @("-ModelId", $m.id, "-OutDir", $ModelsRoot)
+            if ($HFToken) { $params += "-HFToken"; $params += $HFToken }
+            & $dl @params
+            if ($LASTEXITCODE -ne 0) { Fail "[$($m.key)] model download failed" }
+        }
+    }
+}
+elseif ($ModelDir -eq "" -and -not $SkipModelDownload) {
     $ModelDir = Join-Path $ModelsRoot $modelLeaf
     Write-Section "Model download"
     Write-Step "Download-Model.ps1 -ModelId $ModelId -OutDir $ModelsRoot"
@@ -186,7 +237,12 @@ function Send-Tree([string]$localDir, [string]$remoteDir, [string]$label) {
 if (-not $SkipTransfer) {
     Write-Section "Transfer to $Target"
     Send-Tree $BundleDir $RemoteBundle "bundle"
-    if ($ModelDir) {
+    if ($MultiModels.Count -gt 0) {
+        foreach ($m in $MultiModels) {
+            Send-Tree $m.dir "/scratch/models/$($m.leaf)" "model:$($m.key)"
+        }
+    }
+    elseif ($ModelDir) {
         Send-Tree $ModelDir $RemoteModelDir "model"
     }
 }
@@ -196,8 +252,14 @@ if (-not $SkipTransfer) {
 if (-not $SkipRemoteSetup) {
     Write-Section "Remote install (sudo bash setup.sh)"
     # The bundle has no apt/wheels; setup.sh detects that and assumes
-    # apptainer is preinstalled. Stage 7 packs the model dir into a SIF.
-    $remoteCmd = "sudo bash $RemoteBundle/source/LoopCoder/setup.sh --bundle $RemoteBundle --model-src $RemoteModelDir"
+    # apptainer is preinstalled. Multi-model: pass the models parent dir;
+    # setup.sh reads install.yaml's models[] and packs one SIF per key.
+    # Single-model: pass the specific model dir.
+    if ($MultiModels.Count -gt 0) {
+        $remoteCmd = "sudo bash $RemoteBundle/source/LoopCoder/setup.sh --bundle $RemoteBundle --model-src /scratch/models"
+    } else {
+        $remoteCmd = "sudo bash $RemoteBundle/source/LoopCoder/setup.sh --bundle $RemoteBundle --model-src $RemoteModelDir"
+    }
     Write-Step "ssh -t $Target '$remoteCmd'"
     if (-not $DryRun) {
         ssh -t $Target $remoteCmd

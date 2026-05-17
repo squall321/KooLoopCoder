@@ -75,10 +75,13 @@ def run(plan_path: str, goal_id: str | None, resume: bool, config_path: str | No
     from loopcoder.sandbox import make_sandbox
     from loopcoder.loop.controller import LoopController
 
+    # plan.llm.model may be a multi-model key (routes to that vllm@<key>
+    # instance) or a literal served name; resolve_endpoint handles both.
+    _base_url, _model, _api_key = cfg.llm.resolve_endpoint(plan.llm.model)
     client = LlmClient(
-        base_url=cfg.llm.base_url,
-        api_key=cfg.llm.api_key,
-        model=plan.llm.model or cfg.llm.model,
+        base_url=_base_url,
+        api_key=_api_key,
+        model=_model,
         timeout_sec=cfg.llm.request_timeout_sec,
         max_attempts=cfg.llm.retry.max_attempts,
         backoff_initial_sec=cfg.llm.retry.backoff_initial_sec,

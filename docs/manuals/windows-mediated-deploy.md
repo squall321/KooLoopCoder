@@ -115,6 +115,45 @@ That walks through:
 
 ## 5. Common variations
 
+### 5.0 Multi-model (several sizes side by side)
+
+List every model in a deploy config and pass it with `-ConfigYaml`.
+Each entry becomes its own `vllm@<key>` instance on its own port; a
+plan picks one via `llm.model: <key>` (else `default_model`).
+
+```yaml
+# deploy.yaml  (and the same models[] block in install.yaml)
+models:
+  - key: fast
+    id: Qwen/Qwen2.5-Coder-7B-Instruct-AWQ
+    port: 8001
+  - key: big
+    id: Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8
+    port: 8002
+default_model: fast
+```
+
+```powershell
+# Windows: downloads every model in models[], ships each to
+# /scratch/models/<leaf>, runs setup.sh (one model-<key>.sif +
+# vllm@<key> per entry).
+.\scripts\windows\Deploy-To-Linux.ps1 -Target ubuntu@b300 `
+    -BundleDir D:\loopcoder-bundle -ConfigYaml D:\deploy.yaml
+```
+
+```bash
+# Linux build/operator host: one-touch fetch of all models first.
+bash scripts/fetch-models.sh --config deploy.yaml --dest /data/models
+```
+
+Per-plan model selection:
+
+```yaml
+# plan.yaml
+llm:
+  model: big        # routes to the vllm@big instance; omit -> default_model
+```
+
 ### 5.1 Start small (sample first → big model later)
 
 ```powershell

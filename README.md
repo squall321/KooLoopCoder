@@ -71,6 +71,8 @@ Detailed onboarding: see [`HANDOFF.md`](HANDOFF.md), planning at
 | `setup.sh` | Offline staged installer for the GPU host (SIF-only or legacy bundle) |
 | `test_setup.sh` + `bundle/test_vm/` | No-internet, no-GPU Test VM that re-runs setup.sh and asserts post-conditions |
 | `scripts/pack-model.sh` | Pack an unpacked HF model dir into a single read-only `model.sif` |
+| `scripts/fetch-models.sh` | One-touch fetch of every model in a deploy.yaml `models[]` + catalog resolve |
+| `systemd/vllm@.service.template` | Instanced unit: one `vllm@<key>` per model (multi-model serving) |
 | `scripts/upgrade-suite.sh` | Atomic SIF upgrade: `cp` + `ln -sfn` + `systemctl restart` |
 | `scripts/windows/` | PowerShell deploy (SIF-only, no WSL2) + HF model download |
 | `vscode-extension/` | TypeScript VS Code / Cursor / Windsurf extension |

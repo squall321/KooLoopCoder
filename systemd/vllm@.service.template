@@ -1,0 +1,50 @@
+[Unit]
+# Instanced unit: `systemctl start vllm@<key>` serves one model.
+# %i = the model key (fast, big, ...). Each instance reads its own
+# vllm-<key>.env, packed model SIF, and port — fully independent so
+# several models can run side by side.
+Description=LoopCoder vLLM Inference Server (model %i)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@USER@
+Group=@GROUP@
+EnvironmentFile=@ETC_DIR@/vllm-%i.env
+ExecStartPre=/bin/bash -c 'test -f "${MODEL_SIF}" || (echo "model.sif not found at ${MODEL_SIF} for instance %i" >&2; exit 1)'
+# QUANTIZATION / TOOL_CALL_PARSER are catalog-derived and may be empty
+# (bf16 models pass no --quantization). systemd can't do conditional
+# args, so an inline shell assembles them. All values come from the
+# per-instance EnvironmentFile above.
+ExecStart=/bin/bash -c '\
+  Q=""; [ -n "${QUANTIZATION}" ] && Q="--quantization ${QUANTIZATION}"; \
+  TP=""; [ -n "${TOOL_CALL_PARSER}" ] && TP="--enable-auto-tool-choice --tool-call-parser ${TOOL_CALL_PARSER}"; \
+  exec /usr/bin/apptainer run --nv \
+    --bind ${MODEL_SIF}:/model:image-src=/ \
+    --bind @CACHE_DIR@:/cache \
+    --env HF_HUB_OFFLINE=${HF_HUB_OFFLINE} \
+    --env TRANSFORMERS_OFFLINE=${TRANSFORMERS_OFFLINE} \
+    --env NCCL_P2P_LEVEL=${NCCL_P2P_LEVEL} \
+    --env VLLM_USE_V1=${VLLM_USE_V1} \
+    @VLLM_SIF@ \
+    /opt/vllm/bin/vllm serve /model \
+      --served-model-name ${SERVED_MODEL_NAME} \
+      --tensor-parallel-size ${TENSOR_PARALLEL_SIZE} \
+      --max-model-len ${MAX_MODEL_LEN} \
+      --gpu-memory-utilization ${GPU_MEMORY_UTILIZATION} \
+      $Q $TP \
+      --enable-prefix-caching \
+      --enable-chunked-prefill \
+      --max-num-seqs ${MAX_NUM_SEQS} \
+      --kv-cache-dtype ${KV_CACHE_DTYPE} \
+      --host ${HOST} --port ${PORT}'
+Restart=@SYSTEMD_RESTART@
+RestartSec=@SYSTEMD_RESTART_SEC@
+LimitNOFILE=1048576
+LimitMEMLOCK=infinity
+StandardOutput=append:@LOG_DIR@/vllm-%i.log
+StandardError=append:@LOG_DIR@/vllm-%i.log
+
+[Install]
+WantedBy=multi-user.target

@@ -34,20 +34,37 @@ flags:
   skip_gpu_stages: false             # true = Test VM mode (no nvidia-smi)
   skip_model_stage: false            # true = leave /scratch/models alone
 
-# Optional: stage a model in the deploy step itself. Three modes:
-#   none   — do nothing (model already on the target via OOB upload)
-#   rsync  — local copy → target via rsync (the model lives on YOUR machine)
-#   hf     — download on the target via huggingface_hub (target needs internet,
-#            usually NOT the case on B300 — most teams use 'rsync' or 'none')
+# --- Multi-model (preferred) ---------------------------------------
+# List every model you want available. scripts/fetch-models.sh reads
+# this, downloads each from HuggingFace in one shot, and verifies it
+# against the catalog. setup.sh then brings up one vllm@<key> systemd
+# instance per model (each on its own port). LoopCoder talks to
+# `default_model` unless a plan/request overrides it.
+#
+# Each entry:
+#   key   short name used in plan.yaml / requests + the systemd
+#         instance name (vllm@<key>)
+#   id    HuggingFace repo id (serving params — quant / tp / max_len /
+#         tool parser — auto-resolved from the catalog)
+#   port  vLLM port for this model's instance (must be unique)
+models:
+  - key: fast
+    id: Qwen/Qwen2.5-Coder-7B-Instruct-AWQ
+    port: 8001
+  - key: big
+    id: Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8
+    port: 8002
+
+# Model LoopCoder uses when a plan/request doesn't name one.
+default_model: fast
+
+# --- Single-model (legacy, still honored when `models:` is absent) -
+# Stage one model in the deploy step. Modes:
+#   none   — model already on the target (OOB upload)
+#   rsync  — local copy → target via rsync
+#   hf     — download on the target (target needs internet; rare on B300)
 model:
   mode: none                          # none | rsync | hf
-
-  # If mode = rsync:
   local_path: /data/models/Qwen2.5-Coder-1.5B-Instruct
-
-  # Where on the target the model lives at runtime. Should match
-  # install.yaml's model.destination_path.
   remote_path: /scratch/models/Qwen2.5-Coder-1.5B-Instruct
-
-  # If mode = hf:
   hf_id: Qwen/Qwen2.5-Coder-1.5B-Instruct

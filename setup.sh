@@ -137,6 +137,40 @@ if [[ $REINSTALL -eq 1 ]]; then
     run "rm -f $STATE_DIR/.stage_* 2>/dev/null || true"
 fi
 
+# ---------- multi-model helpers ----------
+# install.yaml may carry models[] (preferred) or a single model. We
+# parse it with Python from the suite SIF (the only guaranteed Python
+# with PyYAML on the offline target). Emits "key<TAB>id<TAB>port" lines;
+# empty output means single-model (legacy) mode.
+_suite_sif() {
+    local c="${SIF_CURRENT_DIR:-/opt/apptainers/current}/loopcoder-suite.sif"
+    [[ -e "$c" ]] && { echo "$c"; return; }
+    echo "$BUNDLE_ROOT/containers/loopcoder-suite.sif"
+}
+
+models_list() {
+    local sif; sif="$(_suite_sif)"
+    [[ -f "$sif" ]] || return 0
+    apptainer exec "$sif" python3 - "$INSTALL_YAML" <<'PY' 2>/dev/null || true
+import sys, yaml
+cfg = yaml.safe_load(open(sys.argv[1])) or {}
+for m in (cfg.get("models") or []):
+    k, i, p = m.get("key"), m.get("id"), m.get("port")
+    if k and i and p:
+        print(f"{k}\t{i}\t{p}")
+PY
+}
+
+default_model_key() {
+    local sif; sif="$(_suite_sif)"
+    [[ -f "$sif" ]] || return 0
+    apptainer exec "$sif" python3 - "$INSTALL_YAML" <<'PY' 2>/dev/null || true
+import sys, yaml
+cfg = yaml.safe_load(open(sys.argv[1])) or {}
+print(cfg.get("default_model") or "")
+PY
+}
+
 # Each stage is a bash function: stage_<n>_<name>.
 
 # Stage 0 — preflight
@@ -246,19 +280,10 @@ stage_6_agent_deps() {
 # into a single read-only model.sif via scripts/pack-model.sh and install
 # it under /opt/apptainers/ with a stable 'model.sif' symlink, mirroring
 # how the other SIFs are staged in stage 8. vLLM bind-mounts it at /model.
-stage_7_model_stage() {
-    if [[ $SKIP_MODEL -eq 1 ]]; then
-        note "--skip-model-stage: model.sif assumed already installed"
-        return 0
-    fi
-
-    local src
-    src="$MODEL_SRC"
-    if [[ -z "$src" ]]; then
-        # Fall back to install.yaml's source_path for legacy callers.
-        src="$(awk -F': *' '/^  source_path:/{print $2; exit}' "$INSTALL_YAML" | tr -d '\"')"
-    fi
-    [[ -n "$src" ]] || fail "no model source (pass --model-src DIR)"
+# Pack one unpacked model dir into $store/model-<sifkey>.sif and point
+# $current/model-<sifkey>.sif at it. Echoes nothing; fails hard on error.
+_pack_one_model() {
+    local src="$1" sifkey="$2"
     [[ -d "$src" ]] || fail "model source dir not found: $src"
     [[ -f "$src/config.json" ]] || fail "config.json missing in $src (not an unpacked HF model dir?)"
 
@@ -266,23 +291,55 @@ stage_7_model_stage() {
     local current="${SIF_CURRENT_DIR:-${store}/current}"
     mkdir -p "$store" "$current"
 
-    local leaf ver_sif
-    leaf="$(basename "$src")"
-    ver_sif="$store/model-${leaf}.sif"
-
+    local ver_sif="$store/model-${sifkey}.sif"
     local packer="${SOURCE_DIR:-$BUNDLE_ROOT/source/LoopCoder}/scripts/pack-model.sh"
     [[ -f "$packer" ]] || packer="$(dirname "$0")/scripts/pack-model.sh"
     [[ -f "$packer" ]] || fail "pack-model.sh not found"
 
     if [[ -f "$ver_sif" && $REINSTALL -eq 0 ]]; then
-        note "model.sif already built: $ver_sif"
+        note "model-${sifkey}.sif already built (skip)"
     else
-        note "packing $src -> $ver_sif (this can take a while for large models)"
+        note "packing $src -> $ver_sif (large models take a while)"
         run "bash '$packer' '$src' '$ver_sif'"
     fi
     run "chmod 644 '$ver_sif'"
-    run "ln -sfn '$(basename "$ver_sif")' '$current/model.sif'"
-    note "model staged: $current/model.sif -> $(basename "$ver_sif")"
+    run "ln -sfn 'model-${sifkey}.sif' '$current/model-${sifkey}.sif'"
+    note "model staged: $current/model-${sifkey}.sif"
+}
+
+stage_7_model_stage() {
+    if [[ $SKIP_MODEL -eq 1 ]]; then
+        note "--skip-model-stage: model SIF(s) assumed already installed"
+        return 0
+    fi
+
+    # Multi-model: each models[] entry's weights are expected at
+    # <MODEL_SRC|/scratch/models>/<leaf>/ (deploy / fetch-models.sh
+    # convention). Pack one model-<key>.sif per entry.
+    local entries; entries="$(models_list)"
+    if [[ -n "$entries" ]]; then
+        local model_root="${MODEL_SRC:-${MODEL_CACHE:-/scratch/models}}"
+        while IFS=$'\t' read -r key mid port; do
+            [[ -n "$key" ]] || continue
+            local leaf="${mid##*/}"
+            local src="$model_root/$leaf"
+            note "[$key] $mid"
+            _pack_one_model "$src" "$key"
+        done <<< "$entries"
+        note "multi-model: staged $(echo "$entries" | grep -c .) model SIF(s)"
+        return 0
+    fi
+
+    # Single-model (legacy).
+    local src="$MODEL_SRC"
+    if [[ -z "$src" ]]; then
+        src="$(awk -F': *' '/^  source_path:/{print $2; exit}' "$INSTALL_YAML" | tr -d '\"')"
+    fi
+    [[ -n "$src" ]] || fail "no model source (pass --model-src DIR or use models[])"
+    local leaf; leaf="$(basename "$src")"
+    _pack_one_model "$src" "$leaf"
+    # Legacy stable name the single-model vllm.service expects.
+    run "ln -sfn 'model-${leaf}.sif' '${SIF_CURRENT_DIR:-/opt/apptainers/current}/model.sif'"
 }
 
 # Stage 8 — vllm_image / sandbox / suite — install into /opt/apptainers/
@@ -325,17 +382,10 @@ stage_8_vllm_image() {
 }
 
 # Stage 9 — systemd_unit
-stage_9_systemd_unit() {
-    # Model id from install.yaml is the single source of truth. Everything
-    # the model implies (quantization, tensor-parallel, max context,
-    # tool-call parser) is resolved from the catalog so the operator only
-    # ever edits model.id. vllm.yaml keeps only model-independent knobs.
-    local model_id
-    model_id="$(awk -F': *' '/^  id:/{print $2; exit}' "$INSTALL_YAML" | tr -d '\"')"
-    [[ -n "$model_id" ]] || fail "model.id missing in $INSTALL_YAML"
-
-    # /usr/local/bin/loopcoder is the suite.sif wrapper (stage 12). The
-    # catalog ships inside the suite SIF's source copy.
+# Write one vllm-<key>.env from catalog-resolve(model_id) + vllm.yaml
+# knobs. $1=model_id $2=env_path $3=served_name $4=port
+_write_vllm_env() {
+    local model_id="$1" env_file="$2" served="$3" port="$4"
     local resolved
     resolved="$(/usr/local/bin/loopcoder catalog-resolve "$model_id" 2>/dev/null)" \
         || fail "catalog-resolve failed for '$model_id'"
@@ -344,13 +394,10 @@ stage_9_systemd_unit() {
     M_TP="$(echo "$resolved"     | awk -F= '/^MODEL_TP=/{print $2}')"
     M_MAXLEN="$(echo "$resolved" | awk -F= '/^MODEL_MAX_LEN=/{print $2}')"
     M_PARSER="$(echo "$resolved" | awk -F= '/^MODEL_TOOL_PARSER=/{print $2}')"
-    note "resolved $model_id -> quant=${M_QUANT:-none} tp=$M_TP max_len=$M_MAXLEN parser=$M_PARSER"
-
-    # Render vllm.env. Model-derived values come from the catalog;
-    # gpu/throughput/host knobs still come from vllm.yaml.
-    local env_file="$ETC_DIR/vllm.env"
+    note "resolved $model_id -> quant=${M_QUANT:-none} tp=$M_TP max_len=$M_MAXLEN parser=$M_PARSER port=$port"
     {
         echo "# autogenerated: model-derived from catalog, rest from $VLLM_YAML"
+        echo "SERVED_MODEL_NAME=$served"
         echo "TENSOR_PARALLEL_SIZE=$M_TP"
         echo "MAX_MODEL_LEN=$M_MAXLEN"
         echo "QUANTIZATION=$M_QUANT"
@@ -359,21 +406,61 @@ stage_9_systemd_unit() {
         echo "MAX_NUM_SEQS=$(awk -F': *' '/^  max_num_seqs:/{print $2; exit}' "$VLLM_YAML")"
         echo "KV_CACHE_DTYPE=$(awk -F': *' '/^  kv_cache_dtype:/{print $2; exit}' "$VLLM_YAML")"
         echo "HOST=$(awk -F': *' '/^  host:/{print $2; exit}' "$VLLM_YAML" | tr -d '\"')"
-        echo "PORT=$(awk -F': *' '/^  port:/{print $2; exit}' "$VLLM_YAML")"
+        echo "PORT=$port"
         echo "HF_HUB_OFFLINE=1"
         echo "TRANSFORMERS_OFFLINE=1"
         echo "NCCL_P2P_LEVEL=NVL"
         echo "VLLM_USE_V1=1"
     } > "$env_file"
+}
 
-    # Render systemd unit
+stage_9_systemd_unit() {
+    local current="${SIF_CURRENT_DIR:-/opt/apptainers/current}"
+
+    # ---- Multi-model: one vllm@<key> instance per models[] entry ----
+    local entries; entries="$(models_list)"
+    if [[ -n "$entries" ]]; then
+        local tmpl="${SOURCE_DIR:-$BUNDLE_ROOT/source/LoopCoder}/systemd/vllm@.service.template"
+        [[ -f "$tmpl" ]] || tmpl="$(dirname "$0")/systemd/vllm@.service.template"
+        [[ -f "$tmpl" ]] || fail "vllm@.service.template not found"
+
+        # Single instanced unit file; per-instance differences live in
+        # vllm-<key>.env (MODEL_SIF, PORT, served name, catalog params).
+        sed -e "s#@USER@#$LOOPCODER_USER#g" \
+            -e "s#@GROUP@#$LOOPCODER_GROUP#g" \
+            -e "s#@ETC_DIR@#$ETC_DIR#g" \
+            -e "s#@CACHE_DIR@#$INSTALL_ROOT/cache#g" \
+            -e "s#@VLLM_SIF@#$current/vllm.sif#g" \
+            -e "s#@LOG_DIR@#$LOG_DIR#g" \
+            -e "s#@SYSTEMD_RESTART@#on-failure#g" \
+            -e "s#@SYSTEMD_RESTART_SEC@#15#g" \
+            "$tmpl" > /etc/systemd/system/vllm@.service
+
+        while IFS=$'\t' read -r key mid port; do
+            [[ -n "$key" ]] || continue
+            _write_vllm_env "$mid" "$ETC_DIR/vllm-${key}.env" "$key" "$port"
+            # MODEL_SIF is per-instance → append to that instance's env.
+            echo "MODEL_SIF=$current/model-${key}.sif" >> "$ETC_DIR/vllm-${key}.env"
+        done <<< "$entries"
+        note "rendered vllm@.service + per-model env ($(echo "$entries" | grep -c .) instances)"
+        _stage9_loopcoder_unit
+        return 0
+    fi
+
+    # ---- Single-model (legacy): vllm.service ----
+    local model_id
+    model_id="$(awk -F': *' '/^  id:/{print $2; exit}' "$INSTALL_YAML" | tr -d '\"')"
+    [[ -n "$model_id" ]] || fail "model.id missing in $INSTALL_YAML"
+
+    local env_file="$ETC_DIR/vllm.env"
+    _write_vllm_env "$model_id" "$env_file" "$model_id" \
+        "$(awk -F': *' '/^  port:/{print $2; exit}' "$VLLM_YAML")"
+
     local tmpl="${SOURCE_DIR:-$BUNDLE_ROOT/source/LoopCoder}/systemd/vllm.service.template"
     [[ -f "$tmpl" ]] || tmpl="$(dirname "$0")/systemd/vllm.service.template"
     [[ -f "$tmpl" ]] || fail "vllm.service.template not found"
 
-    local current="${SIF_CURRENT_DIR:-/opt/apptainers/current}"
     local model_sif="$current/model.sif"
-
     sed -e "s#@MODEL_SIF@#$model_sif#g" \
         -e "s#@USER@#$LOOPCODER_USER#g" \
         -e "s#@GROUP@#$LOOPCODER_GROUP#g" \
@@ -384,6 +471,15 @@ stage_9_systemd_unit() {
         -e "s#@SYSTEMD_RESTART@#on-failure#g" \
         -e "s#@SYSTEMD_RESTART_SEC@#15#g" \
         "$tmpl" > /etc/systemd/system/vllm.service
+
+    _stage9_loopcoder_unit
+}
+
+# Shared tail of stage 9: loopcoder.env + loopcoder.service + user +
+# daemon-reload + enable. Enables either vllm@<key> instances (multi) or
+# the single vllm.service (legacy), based on install.yaml.
+_stage9_loopcoder_unit() {
+    local current="${SIF_CURRENT_DIR:-/opt/apptainers/current}"
 
     # Render loopcoder.env — the suite SIF reads LOOPCODER_API_HOST/PORT
     # (and the optional bearer key) from here via the unit's
@@ -435,47 +531,89 @@ stage_9_systemd_unit() {
     chown -R "$LOOPCODER_USER:$LOOPCODER_GROUP" "$INSTALL_ROOT" "$LOG_DIR" "$STATE_DIR" || true
 
     run "systemctl daemon-reload"
-    run "systemctl enable vllm"
+    local entries; entries="$(models_list)"
+    if [[ -n "$entries" ]]; then
+        while IFS=$'\t' read -r key mid port; do
+            [[ -n "$key" ]] || continue
+            run "systemctl enable vllm@${key}"
+        done <<< "$entries"
+    else
+        run "systemctl enable vllm"
+    fi
     if [[ -f /etc/systemd/system/loopcoder.service ]]; then
         run "systemctl enable loopcoder"
     fi
 }
 
-# Stage 10 — start_vllm
-stage_10_start_vllm() {
-    if [[ $SKIP_GPU -eq 1 ]]; then
-        note "TEST MODE: vllm.service NOT started (no GPU). Verifying enable only."
-        systemctl is-enabled vllm >/dev/null || fail "vllm.service not enabled"
-        return 0
-    fi
-    run "systemctl start vllm"
-    local port
-    port="$(awk -F': *' '/^  port:/{print $2; exit}' "$VLLM_YAML")"
-    log "waiting for vLLM to come up on :${port}…"
+# Wait for one vLLM instance to answer /v1/models on $1=port.
+_wait_vllm_ready() {
+    local port="$1" label="$2"
+    log "waiting for vLLM [$label] on :${port}…"
     for i in $(seq 1 180); do
         if curl -sf "http://127.0.0.1:${port}/v1/models" >/dev/null 2>&1; then
-            note "vLLM ready after ${i}*5s"
+            note "vLLM [$label] ready after ${i}*5s"
             return 0
         fi
         sleep 5
     done
-    fail "vLLM did not become ready within 15 minutes"
+    fail "vLLM [$label] did not become ready within 15 minutes"
 }
 
-# Stage 11 — smoke_test
+# Stage 10 — start_vllm (per-instance when multi-model)
+stage_10_start_vllm() {
+    local entries; entries="$(models_list)"
+    if [[ $SKIP_GPU -eq 1 ]]; then
+        note "TEST MODE: vLLM NOT started (no GPU). Verifying enable only."
+        if [[ -n "$entries" ]]; then
+            while IFS=$'\t' read -r key mid port; do
+                [[ -n "$key" ]] || continue
+                systemctl is-enabled "vllm@${key}" >/dev/null || fail "vllm@${key} not enabled"
+            done <<< "$entries"
+        else
+            systemctl is-enabled vllm >/dev/null || fail "vllm.service not enabled"
+        fi
+        return 0
+    fi
+    if [[ -n "$entries" ]]; then
+        while IFS=$'\t' read -r key mid port; do
+            [[ -n "$key" ]] || continue
+            run "systemctl start vllm@${key}"
+            _wait_vllm_ready "$port" "$key"
+        done <<< "$entries"
+        return 0
+    fi
+    run "systemctl start vllm"
+    _wait_vllm_ready "$(awk -F': *' '/^  port:/{print $2; exit}' "$VLLM_YAML")" "single"
+}
+
+# Probe one model's /v1/chat/completions on $1=port $2=served-name.
+_smoke_one() {
+    local port="$1" model="$2" label="$3"
+    local payload="{\"model\":\"$model\",\"messages\":[{\"role\":\"user\",\"content\":\"What is 1+1? Answer with one digit only.\"}],\"max_tokens\":4}"
+    local resp
+    resp="$(curl -sf -H 'Content-Type: application/json' -d "$payload" "http://127.0.0.1:${port}/v1/chat/completions" || true)"
+    [[ "$resp" == *"\"2\""* ]] || note "WARNING: smoke [$label] did not contain '2'. Response: $resp"
+    note "smoke [$label] OK"
+}
+
+# Stage 11 — smoke_test (per-instance when multi-model)
 stage_11_smoke_test() {
     if [[ $SKIP_GPU -eq 1 ]]; then
         note "TEST MODE: smoke skipped (no GPU)"
         return 0
     fi
-    local port model
-    port="$(awk -F': *' '/^  port:/{print $2; exit}' "$VLLM_YAML")"
-    model="$(awk -F': *' '/^  id:/{print $2; exit}' "$INSTALL_YAML" | tr -d '\"')"
-    local payload="{\"model\":\"$model\",\"messages\":[{\"role\":\"user\",\"content\":\"What is 1+1? Answer with one digit only.\"}],\"max_tokens\":4}"
-    local resp
-    resp="$(curl -sf -H 'Content-Type: application/json' -d "$payload" "http://127.0.0.1:${port}/v1/chat/completions" || true)"
-    [[ "$resp" == *"\"2\""* ]] || note "WARNING: smoke completion did not contain '2'. Response: $resp"
-    note "smoke OK"
+    local entries; entries="$(models_list)"
+    if [[ -n "$entries" ]]; then
+        while IFS=$'\t' read -r key mid port; do
+            [[ -n "$key" ]] || continue
+            _smoke_one "$port" "$key" "$key"
+        done <<< "$entries"
+        return 0
+    fi
+    _smoke_one \
+        "$(awk -F': *' '/^  port:/{print $2; exit}' "$VLLM_YAML")" \
+        "$(awk -F': *' '/^  id:/{print $2; exit}' "$INSTALL_YAML" | tr -d '\"')" \
+        "single"
 }
 
 # Stage 12 — agent_install (CLI)
