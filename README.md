@@ -54,6 +54,18 @@ ssh -L 8765:127.0.0.1:8765 b300                # tunnel API
 # Author plan.yaml → command: "LoopCoder: Run Plan from Active Editor"
 ```
 
+## Deployment modes
+
+Build the SIF bundle once (`scripts/build-sif-bundle.sh`), then deploy
+one of three ways. Full step-by-step + decision guide:
+[`docs/manuals/PROCEDURES.md`](docs/manuals/PROCEDURES.md).
+
+| Target | Mode | Entry |
+|---|---|---|
+| Linux GPU box, SSH + sudo | **A** Linux→Linux | `scripts/deploy.sh user@host` → [one-command-deploy.md](docs/manuals/one-command-deploy.md) |
+| Air-gapped B300, only Windows online | **B** Windows-mediated | `scripts/windows/Deploy-To-Linux.ps1` → [windows-mediated-deploy.md](docs/manuals/windows-mediated-deploy.md) |
+| HPC cluster, no root, Slurm | **C** HPC | `scripts/hpc/loopcoder-hpc.sh` → [hpc-slurm.md](docs/manuals/hpc-slurm.md) |
+
 Detailed onboarding: see [`HANDOFF.md`](HANDOFF.md), planning at
 [`PLAN.md`](PLAN.md), live status at [`PROGRESS.md`](PROGRESS.md).
 

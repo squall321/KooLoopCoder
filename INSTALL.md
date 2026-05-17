@@ -1,72 +1,65 @@
 # LoopCoder — Install Guide
 
-## Prerequisites
+LoopCoder runs from three self-contained Apptainer SIFs. You build the
+bundle once on a Linux host with internet, then deploy it one of three
+ways depending on your target.
 
-**Bundle host** (Ubuntu 22.04 in this project):
-- virt-manager / libvirt / KVM (`apt install virt-manager qemu-kvm libvirt-daemon-system`)
-- xorriso *or* genisoimage (`apt install xorriso`)
-- ssh, rsync, curl, sha256sum
+> **Full step-by-step for every mode:**
+> [`docs/manuals/PROCEDURES.md`](docs/manuals/PROCEDURES.md). This page
+> is the quick map.
 
-**B300 deployment node** (Ubuntu 24.04, NO internet):
-- NVIDIA driver + CUDA ≥ 12.8 (Blackwell required)
-- 8× B300 GPUs
-- ≥ 1 TB free at `/scratch`
-- A read-only mount at `/models` containing the bundle
+## Step 0 — Build the SIF bundle (always, on a Linux host)
 
-## End-to-end procedure
-
-### 1. Bundle build (on the 22.04 host with internet)
+Requires `apptainer ≥ 1.3` + internet. **No VM, no WSL2, no root**
+(beyond what `apptainer build` itself needs).
 
 ```bash
-git clone <this-repo> LoopCoder
-cd LoopCoder
-bash bundle.sh                                     # builds bundle in LoopCoder/output/bundle/
+git clone https://github.com/squall321/KooLoopCoder
+cd KooLoopCoder
+bash scripts/build-sif-bundle.sh        # → output/sif-bundle/
 ```
 
-This:
-- Creates a Bundle VM (Ubuntu 24.04) under `/data/loopcoder-vm/`.
-- Inside the VM, downloads .deb packages, Python wheels, the vLLM Docker
-  image (converted to Apptainer .sif), the sandbox .sif, and model weights.
-- Writes manifest.yaml + manifest.sha256 to `LoopCoder/output/bundle/`.
+Output: `containers/{vllm,loopcoder-suite,loopcoder-sandbox}.sif`,
+`source/LoopCoder/`, `win-tools/`, `manifest.sha256`. The model is
+fetched separately (it never goes inside the bundle).
 
-### 2. Test the bundle (still on the 22.04 host)
+## Pick a deployment mode
 
-```bash
-bash test_setup.sh                                 # spins up Test VM, runs setup.sh --skip-gpu-stages
-```
+| Target | Mode | Command |
+|---|---|---|
+| Linux GPU box reachable by SSH (you have sudo there) | **A** | `sudo bash scripts/deploy.sh user@host --bundle output/sif-bundle` |
+| Air-gapped B300, only a Windows PC has internet | **B** | `Deploy-To-Linux.ps1 -Target user@b300 -BundleDir D:\bundle` |
+| Shared HPC cluster, no root, Slurm jobs | **C** | `scripts/hpc/loopcoder-hpc.sh submit-allinone plan.yaml` |
 
-The Test VM has no internet and no GPU, so it exercises stages 0, 2-9, 12,
-13 (i.e. everything except GPU verification, vLLM start, and smoke).
+Each mode's exact prerequisites, model layout, multi-model setup and
+verification steps are in:
 
-A markdown report lands in `/data/loopcoder-test-results/`.
+- Mode A: [`docs/manuals/one-command-deploy.md`](docs/manuals/one-command-deploy.md)
+- Mode B: [`docs/manuals/windows-mediated-deploy.md`](docs/manuals/windows-mediated-deploy.md)
+- Mode C: [`docs/manuals/hpc-slurm.md`](docs/manuals/hpc-slurm.md)
+- Overview + decision guide: [`docs/manuals/PROCEDURES.md`](docs/manuals/PROCEDURES.md)
 
-### 3. Transfer to B300
+## Target prerequisites (common)
 
-```bash
-rsync -avP LoopCoder/output/bundle/ b300:/models/
-```
+- NVIDIA driver + CUDA suitable for your GPU (Blackwell/sm_120: set
+  `TORCH_CUDA_ARCH_LIST=12.0` if vLLM mis-detects the arch).
+- `apptainer` installed on the GPU machine (Modes A/B/C all assume it;
+  the legacy apt path can install it in Mode A only).
+- Disk for the model under `/scratch/models` (systemd modes) or
+  `$LOOPCODER_HOME/models` (HPC).
 
-### 4. Install on B300 (offline)
+## Config (all modes)
 
-On the B300 node:
+Three YAMLs, copied from `config/*.example`:
 
-```bash
-# /models is now populated with the bundle
-sudo cp /models/source/LoopCoder/config/install.yaml.example  /etc/loopcoder/install.yaml
-sudo cp /models/source/LoopCoder/config/vllm.yaml.example     /etc/loopcoder/vllm.yaml
-sudo cp /models/source/LoopCoder/config/loopcoder.yaml.example /etc/loopcoder/loopcoder.yaml
-# review/edit these as needed
-sudo bash /models/source/LoopCoder/setup.sh
-```
+- `install.yaml` — the **only thing you normally edit**: `model.id`
+  (single) or `models[]` + `default_model` (multi). Quantization,
+  tensor-parallel, max-len and the tool-call parser are resolved
+  automatically from `config/model-catalog.yaml`.
+- `vllm.yaml` — model-independent throughput/memory knobs only.
+- `loopcoder.yaml` — agent loop, sandbox, `llm.base_url`.
 
-setup.sh runs all 14 stages including GPU verification, model staging to
-`/scratch/models/`, vLLM systemd service start, and a smoke test.
-
-### 5. First run
-
-```bash
-loopcoder run --plan /models/source/LoopCoder/examples/plan_simple.yaml
-```
+Validate after edits: `loopcoder config validate`.
 
 ## Day-to-day commands
 
@@ -74,12 +67,12 @@ loopcoder run --plan /models/source/LoopCoder/examples/plan_simple.yaml
 loopcoder list                       # past sessions
 loopcoder status [SESSION_ID]        # progress / state
 loopcoder report SESSION_ID > out.md
-loopcoder tokens SESSION_ID
 loopcoder config validate
 loopcoder config show                # merged config
+loopcoder catalog-resolve <model_id> # what serving params a model gets
 ```
 
-## Resume / re-run
+## Resume / re-run (systemd modes)
 
 ```bash
 sudo bash setup.sh                   # idempotent: skips completed stages
@@ -88,19 +81,25 @@ sudo bash setup.sh --reinstall       # wipe markers, redo all
 sudo bash setup.sh --uninstall       # remove install (keeps model cache)
 ```
 
-## Editing config
+## Upgrading the agent (systemd modes)
 
-Run `loopcoder config validate` after every change. Most changes (model
-parameters, sandbox bind mounts, allowed shell patterns) take effect on the
-next `loopcoder run`. Changes to `vllm.yaml` need
-`systemctl restart vllm`.
+Re-push the bundle, then swap the SIF without touching the model:
+
+```bash
+sudo bash scripts/upgrade-suite.sh \
+    /models/containers/loopcoder-suite.sif loopcoder-suite.sif
+```
 
 ## Troubleshooting
 
-- vLLM not coming up → `journalctl -u vllm -n 200`
-- "must read_file before edit" → make sure the agent reads a file first;
-  this is a guardrail, not a bug.
-- Apptainer build fails on Bundle VM → check `docker.io` is running and
-  the `vllm/vllm-openai:latest` image is reachable.
-- Test VM gets internet (assertion fails) → run
-  `virsh net-edit loopcoder-test-isolated` and confirm `forward mode='none'`.
+| Symptom | Check |
+|---|---|
+| vLLM not coming up (systemd) | `journalctl -u vllm -n 200` (or `vllm@<key>` for multi-model) |
+| vLLM dies on Blackwell GPUs | `export TORCH_CUDA_ARCH_LIST=12.0` before deploy/submit |
+| "must read_file before edit" | Guardrail, not a bug — the agent must read a file first |
+| Model wraps tool calls in markdown | Handled — the suite SIF's content-fallback parser recovers them |
+| Legacy VM bundle (`bundle.sh`) | Still present but superseded by `build-sif-bundle.sh`; see PROCEDURES.md |
+
+> The old virt-manager VM bundle pipeline (`bundle.sh` + `bundle/vm/`)
+> still exists for reference but is **superseded** by the SIF-only flow
+> above. New deployments should use Step 0 + a mode.

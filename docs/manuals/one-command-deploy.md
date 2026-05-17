@@ -1,10 +1,18 @@
-# One-command deploy to a B300 (or any 24.04 GPU host)
+# One-command deploy to a B300 (or any 24.04 GPU host) — Mode A
+
+> This is **Mode A** of [`PROCEDURES.md`](PROCEDURES.md): build host
+> SSHes to a Linux GPU box and deploys in one command. Start there for
+> the mode-selection map and Step 0 (building the SIF bundle).
+>
+> **SIF-only note:** new deployments build the bundle with
+> `scripts/build-sif-bundle.sh` (no `apt/`, no `wheels/` — the B300
+> already has apptainer; everything else is inside the SIFs). The
+> `bundle.sh`/VM and `apt/`+`wheels/` references below describe the
+> *legacy* bundle layout, which `deploy.sh` still accepts; with a
+> SIF-only bundle the apt/wheel stages simply no-op.
 
 > Goal: from any machine that has SSH passwordless access to the GPU
-> server, deploy LoopCoder with **one command and one YAML file**. The
-> GPU host needs nothing pre-installed except the NVIDIA driver and
-> SSH server (`apt install openssh-server`). Apptainer, vLLM, the agent,
-> and the systemd units all come from the bundle.
+> server, deploy LoopCoder with **one command and one YAML file**.
 
 ---
 
