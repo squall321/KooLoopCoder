@@ -368,3 +368,37 @@
 - 2026-05-06 단위테스트 추가: `test_config_container.py` (5), `test_upgrade_script.py` (5). README 갱신 (badges + 새 아키텍처).
 - 2026-05-06 **최종: 139/139 PASS + ruff 0 errors + 25 shell scripts syntax OK**.
 
+
+---
+
+## 2026-05-16~17 — SIF-only 전환 / 멀티모델 / HPC / 실증 (아키텍처 대전환)
+
+> ⚠️ 위 Phase 1A~3은 **구(舊) VM 번들 파이프라인** 기준. 아래가 현행이다.
+> 정직한 검증 매트릭스는 `docs/VERIFICATION.md` 참조 (단일 진실공원).
+
+### 아키텍처 변경
+- **SIF-only 배포** (commit dfbba55): VM/WSL2/apt/wheel 번들 폐기. `scripts/build-sif-bundle.sh`로 SIF 3종+source+cwRsync만. B300에 apptainer 기설치 전제.
+- **모델명 자동화** (5810787): install.yaml `model.id` 한 줄 → catalog-resolve가 quant/tp/max_len/tool-parser 자동 도출. 미등록 모델은 fp8/awq/gptq 휴리스틱.
+- **API bind env화** (427c2de): 하드코딩 0.0.0.0:8765 제거 → loopcoder.env 제어.
+- **멀티모델** (d9ceef7): deploy/install.yaml `models[]`+default_model, `vllm@<key>` 인스턴스, `fetch-models.sh` 원터치, `resolve_endpoint` 라우팅.
+- **HPC/Slurm 모드** (f3155e9): `scripts/hpc/loopcoder-hpc.sh` — sudo/systemd 없이 $LOOPCODER_HOME, submit-allinone/serve.
+- **content-fallback tool 파싱** (d26fb5a): 모델이 tool_call을 ```마크다운으로 감싸도 복구.
+- **절차 문서 통합** (113a96e): PROCEDURES.md + INSTALL.md 재작성.
+
+### 실증 결과 (RTX 5070 Ti 16GB, Blackwell sm_120)
+- ✅ vLLM 구동 (flashinfer 제거 + VLLM_USE_FLASHINFER_SAMPLER=0)
+- ✅ 7B-AWQ end-to-end: 추론 → loopcoder 루프 → hello.py 생성 → verify PASS
+- ✅ 외부검증 거짓보고 차단 (0.5B는 정직하게 FAIL)
+- ✅ 멀티모델 2개 동시구동 (0.5B+7B-AWQ, 13.6/16GB) + plan llm.model 라우팅 실증
+- ✅ 단위+mock-E2E 202/202, ruff clean
+- ⚠️ deploy.sh / Windows PS1 / HPC sbatch / 480B / 전체 setup.sh: **스크립트 완성, 실 하드웨어 미실증** (B300/Windows/Slurm 접근 없음)
+
+### 변경 이력 (append-only, continued)
+| 시각 | 변경 |
+|---|---|
+| 2026-05-16 | catalog.py entrypoint fix (f305075), SIF-only deploy (dfbba55) |
+| 2026-05-16 | Blackwell vLLM workaround + tiny-e2e (03f484b) |
+| 2026-05-17 | content-fallback (d26fb5a), model-id automation (5810787) |
+| 2026-05-17 | API env bind (427c2de), multi-model (d9ceef7) |
+| 2026-05-17 | HPC Slurm mode (f3155e9), procedure docs (113a96e) |
+| 2026-05-17 | 멀티모델 동시구동+라우팅 실증, docs/VERIFICATION.md |
