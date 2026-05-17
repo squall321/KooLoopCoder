@@ -214,6 +214,23 @@ def select_model(profile: str, catalog_path: str | None, list_all: bool, as_json
     sys.exit(rc)
 
 
+@main.command(name="catalog-resolve")
+@click.argument("model_id")
+@click.option("--catalog", "catalog_path", default=None, help="Override catalog YAML.")
+@click.option("--json", "as_json", is_flag=True, default=False, help="JSON instead of KEY=VALUE.")
+def catalog_resolve(model_id: str, catalog_path: str | None, as_json: bool) -> None:
+    """Resolve a model id to vLLM serving flags (used by setup.sh)."""
+    import sys
+    from loopcoder.catalog import resolve_cli
+    argv = [model_id]
+    if catalog_path:
+        argv += ["--catalog", catalog_path]
+    if as_json:
+        argv += ["--json"]
+    sys.argv = ["loopcoder-catalog-resolve"] + argv
+    sys.exit(resolve_cli())
+
+
 @main.command(name="mcp")
 @click.option("--transport", type=click.Choice(["stdio", "sse"]), default="stdio", show_default=True)
 @click.option("--host", default="127.0.0.1", show_default=True)

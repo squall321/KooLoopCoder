@@ -13,6 +13,7 @@ helpers that pick a model before downloading from HuggingFace.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -39,8 +40,23 @@ class CatalogModel(BaseModel):
     is_coder: bool = False
     is_moe: bool = False
     requires_hf_token: bool = False
+    # vLLM serving knobs derivable from the model alone. quant maps to
+    # vLLM's --quantization (bf16 -> none, i.e. don't pass the flag).
+    # tool_call_parser is the vLLM --tool-call-parser; Qwen ships the
+    # hermes <tool_call> template, so that's the sane default.
+    tool_call_parser: str = "hermes"
     recommended_for: list[str] = Field(default_factory=list)
     notes: str = ""
+
+    @property
+    def vllm_quantization(self) -> str:
+        """vLLM --quantization value, or '' when the model is unquantized."""
+        q = (self.quant or "").lower()
+        if q in ("", "bf16", "fp16", "none", "float16", "bfloat16"):
+            return ""
+        if q == "awq":
+            return "awq_marlin"
+        return q  # fp8, gptq, awq_marlin, etc. pass through
 
 
 class Catalog(BaseModel):
@@ -150,6 +166,80 @@ def recommend_cli() -> int:
             print(f"    tp_default={m.tp_default}  max_model_len={m.max_model_len}")
             if m.notes:
                 print(f"    note: {m.notes}")
+    return 0
+
+
+def resolve_model(model_id: str, catalog_path: str | Path | None = None) -> dict[str, Any]:
+    """Derive everything needed to serve `model_id` from its name alone.
+
+    Looks the model up in the catalog; if absent, falls back to id-based
+    heuristics so an operator can still name an arbitrary HF repo in
+    install.yaml without editing serving flags by hand.
+    """
+    leaf = model_id.rsplit("/", 1)[-1]
+    try:
+        cat = load_catalog(catalog_path)
+        m = cat.model(model_id)
+        quant = m.vllm_quantization
+        tp = m.tp_default
+        max_len = m.max_model_len
+        parser = m.tool_call_parser
+        known = True
+    except (FileNotFoundError, KeyError):
+        # Heuristics from the repo name.
+        low = model_id.lower()
+        if "fp8" in low:
+            quant = "fp8"
+        elif "awq" in low:
+            quant = "awq_marlin"
+        elif "gptq" in low:
+            quant = "gptq_marlin"
+        else:
+            quant = ""
+        tp = 1
+        max_len = 32768
+        parser = "hermes"
+        known = False
+    return {
+        "id": model_id,
+        "leaf": leaf,
+        "known_in_catalog": known,
+        "quantization": quant,           # "" => don't pass --quantization
+        "tensor_parallel_size": tp,
+        "max_model_len": max_len,
+        "tool_call_parser": parser,
+    }
+
+
+def resolve_cli() -> int:
+    """Entrypoint for ``loopcoder catalog-resolve <model_id> [--json]``.
+
+    setup.sh calls this to turn a single model id in install.yaml into
+    concrete vLLM serving flags. Shell-friendly KEY=VALUE by default.
+    """
+    import argparse
+    import json
+
+    ap = argparse.ArgumentParser(
+        description="Resolve a model id to vLLM serving parameters.",
+    )
+    ap.add_argument("model_id", help="HuggingFace repo id (e.g. Qwen/Qwen2.5-Coder-7B-Instruct-AWQ).")
+    ap.add_argument("--catalog", default=None, help="Override catalog YAML path.")
+    ap.add_argument("--json", action="store_true", help="JSON instead of KEY=VALUE.")
+    args = ap.parse_args()
+
+    info = resolve_model(args.model_id, args.catalog)
+    if args.json:
+        print(json.dumps(info, indent=2))
+    else:
+        # Shell-eval friendly: MODEL_QUANTIZATION=fp8 etc.
+        print(f"MODEL_ID={info['id']}")
+        print(f"MODEL_LEAF={info['leaf']}")
+        print(f"MODEL_KNOWN={'1' if info['known_in_catalog'] else '0'}")
+        print(f"MODEL_QUANTIZATION={info['quantization']}")
+        print(f"MODEL_TP={info['tensor_parallel_size']}")
+        print(f"MODEL_MAX_LEN={info['max_model_len']}")
+        print(f"MODEL_TOOL_PARSER={info['tool_call_parser']}")
     return 0
 
 

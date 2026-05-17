@@ -7,11 +7,13 @@ serving:
   api_key: ""                         # empty = no auth (loopback only)
 
 engine:
-  tensor_parallel_size: 8             # B300 ×8
-  max_model_len: 262144               # 256K context
+  # Model-derived values (tensor_parallel_size, max_model_len,
+  # quantization, tool-call parser) are NO LONGER set here — they are
+  # resolved from the catalog using install.yaml's model.id, so a model
+  # swap needs no edits here. Only model-independent throughput/memory
+  # knobs remain.
   max_num_seqs: 8                     # single-user; tune up for higher throughput
   gpu_memory_utilization: 0.92
-  quantization: fp8
   enable_prefix_caching: true
   enable_chunked_prefill: true
   swap_space_gb: 0

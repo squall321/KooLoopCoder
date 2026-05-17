@@ -68,6 +68,18 @@ models:
     recommended_for: [rtx_5070ti, h100x8, h200x8, b300x4, b300x8]
     notes: "Recommended sample for first-deploy validation (≤4 GB)."
 
+  - id: Qwen/Qwen2.5-Coder-7B-Instruct-AWQ
+    params_b: 7
+    quant: awq
+    approx_vram_gb: 6
+    license: apache-2.0
+    tp_default: 1
+    max_model_len: 32768
+    is_coder: true
+    tool_call_parser: hermes
+    recommended_for: [rtx_5070ti, h100x8, h200x8, b300x4, b300x8]
+    notes: "4-bit AWQ; fits 16 GB GPUs (verified on RTX 5070 Ti). Needs content-fallback tool parsing (model wraps tool calls in markdown)."
+
   - id: Qwen/Qwen2.5-Coder-7B-Instruct
     params_b: 7
     quant: bf16
@@ -76,7 +88,8 @@ models:
     tp_default: 1
     max_model_len: 32768
     is_coder: true
-    recommended_for: [rtx_5070ti, h100x8, h200x8, b300x4, b300x8]
+    recommended_for: [h100x8, h200x8, b300x4, b300x8]
+    notes: "bf16 ~14 GB weights; needs >16 GB headroom for KV cache (use the AWQ variant on 16 GB cards)."
 
   - id: Qwen/Qwen2.5-Coder-32B-Instruct
     params_b: 32

@@ -13,11 +13,15 @@ paths:
   state_dir: /var/lib/loopcoder
 
 model:
+  # The ONLY line you normally edit. Everything the model implies —
+  # quantization, tensor-parallel size, max context length, and the
+  # vLLM tool-call parser — is resolved automatically at install time
+  # from the model catalog (config/model-catalog.yaml). Unknown repo
+  # ids fall back to id-based heuristics (fp8/awq/gptq in the name).
+  # Model weights are transferred by the deploy step and packed into
+  # model.sif; you do not set source/destination paths here.
   id: "Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8"
-  source_path: /models/Qwen3-Coder-480B-A35B-Instruct-FP8
-  destination_path: /scratch/models/Qwen3-Coder-480B-A35B-Instruct-FP8
   staging:
-    strategy: rsync                   # rsync | symlink | copy
     verify_sha256: true
 
 container:

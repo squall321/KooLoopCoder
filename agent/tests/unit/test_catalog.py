@@ -105,3 +105,51 @@ def test_select_model_list_returns_more_than_one(monkeypatch, capsys):
     assert rc == 0
     body = json.loads(capsys.readouterr().out)
     assert len(body["models"]) > 1
+
+
+def test_resolve_model_known_catalog_entry():
+    from loopcoder.catalog import resolve_model
+
+    info = resolve_model("Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8")
+    assert info["known_in_catalog"] is True
+    assert info["quantization"] == "fp8"
+    assert info["tensor_parallel_size"] == 8
+    assert info["max_model_len"] == 262144
+    assert info["tool_call_parser"] == "hermes"
+    assert info["leaf"] == "Qwen3-Coder-480B-A35B-Instruct-FP8"
+
+
+def test_resolve_model_awq_maps_to_awq_marlin():
+    from loopcoder.catalog import resolve_model
+
+    info = resolve_model("Qwen/Qwen2.5-Coder-7B-Instruct-AWQ")
+    assert info["quantization"] == "awq_marlin"
+
+
+def test_resolve_model_unknown_uses_heuristics():
+    from loopcoder.catalog import resolve_model
+
+    info = resolve_model("some-org/Mystery-Model-13B-GPTQ")
+    assert info["known_in_catalog"] is False
+    assert info["quantization"] == "gptq_marlin"
+    assert info["tool_call_parser"] == "hermes"
+
+
+def test_resolve_model_bf16_yields_no_quantization():
+    from loopcoder.catalog import resolve_model
+
+    info = resolve_model("Qwen/Qwen2.5-Coder-1.5B-Instruct")
+    assert info["quantization"] == ""  # bf16 -> don't pass --quantization
+
+
+def test_resolve_cli_key_value_output(monkeypatch, capsys):
+    import sys
+    from loopcoder.catalog import resolve_cli
+
+    monkeypatch.setattr(sys, "argv", ["x", "Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8"])
+    rc = resolve_cli()
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "MODEL_QUANTIZATION=fp8" in out
+    assert "MODEL_TOOL_PARSER=hermes" in out
+    assert "MODEL_TP=8" in out

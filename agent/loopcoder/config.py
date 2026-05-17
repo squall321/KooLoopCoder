@@ -39,8 +39,11 @@ class ModelStaging(BaseModel):
 
 class ModelConfig(BaseModel):
     id: str
-    source_path: str
-    destination_path: str
+    # Optional: legacy bundles set explicit paths. In the SIF-only flow
+    # the deploy step transfers the model and setup.sh packs it from
+    # --model-src, so these are derived from `id` when omitted.
+    source_path: str | None = None
+    destination_path: str | None = None
     staging: ModelStaging = ModelStaging()
 
 
