@@ -122,12 +122,13 @@ run "rsync -a --delete \
     --exclude '*.sif' \
     '$REPO_ROOT/' '$SOURCE_OUT/'"
 
-# ---------- 3b. apt .deb closure (apptainer + deps) for the offline target ----------
+# ---------- 3b. apt .deb closure + local repo for the offline target ----------
 # B300 has only the NVIDIA driver, no apptainer. We ship the .deb
-# closure so setup.sh can `apt-get install -y ./*.deb` offline. The
-# .deb ABI is Ubuntu-version-specific; the target is 24.04, so we MUST
-# collect from a 24.04 host. If you're not on 24.04, skip and obtain
-# the bundle once from a 24.04 host (container or VM is fine).
+# closure AND a Packages.gz index so setup.sh on the target can do a
+# proper `apt-get install -y apptainer …` against a local file-based
+# apt repo — not `dpkg -i` and not `apt install ./*.deb`. The .deb ABI
+# is Ubuntu-version-specific; the target is 24.04, so the closure MUST
+# come from a 24.04 host. On non-24.04 we skip + print a one-liner.
 if [[ $SKIP_APT -eq 0 ]]; then
     HOST_VER=""
     [[ -r /etc/os-release ]] && HOST_VER="$(. /etc/os-release; echo "${VERSION_ID:0:5}")"
@@ -137,15 +138,25 @@ if [[ $SKIP_APT -eq 0 ]]; then
             log "  apt-rdepends not found; installing (one-time)"
             run "sudo apt-get install -y apt-rdepends"
         fi
+        if ! command -v dpkg-scanpackages >/dev/null 2>&1; then
+            log "  dpkg-scanpackages not found; installing dpkg-dev (one-time)"
+            run "sudo apt-get install -y dpkg-dev"
+        fi
         run "bash '$REPO_ROOT/bundle/in_vm/collect_apt.sh' '$APT_OUT'"
+        # Index the directory as a real apt repo so the target can run
+        # `apt-get update && apt-get install -y apptainer ...`.
+        log "  indexing $APT_OUT as a local apt repo (Packages.gz)"
+        run "( cd '$APT_OUT' && dpkg-scanpackages -m . /dev/null 2>/dev/null \\
+              | gzip -9c > Packages.gz )"
     else
         log "WARN: this host is not Ubuntu 24.04 (got ${HOST_VER:-unknown})"
         log "  apt step skipped — apt/ will be empty. Get the .deb bundle"
-        log "  ONCE from a 24.04 host (e.g.:"
+        log "  ONCE from a 24.04 host (and dpkg-scan it), e.g.:"
         log "    docker run --rm -v \$PWD/$APT_OUT:/out ubuntu:24.04 bash -c \\"
-        log "      'apt-get update && apt-get install -y apt-rdepends && \\"
-        log "       bash /path/to/bundle/in_vm/collect_apt.sh /out')"
-        log "  and place the .deb files under $APT_OUT/ before deploying."
+        log "      'apt-get update && apt-get install -y apt-rdepends dpkg-dev && \\"
+        log "       bash /path/to/bundle/in_vm/collect_apt.sh /out && \\"
+        log "       cd /out && dpkg-scanpackages -m . /dev/null | gzip -9c > Packages.gz'"
+        log "  and place the result under $APT_OUT/ before deploying."
     fi
 else
     log "--skip-apt: assuming B300 already has apptainer (no apt/ in bundle)"

@@ -21,6 +21,7 @@ These were missing/broken when "ready for B300 (24.04, driver
 | setup.sh stage 4 just failed if apptainer absent | Now points operators at the exact bundle/build path to fix it | ✅ Unit test |
 | Blackwell sm_100/120 vLLM crash (FlashInfer arch bug) | `vllm.def` strips `flashinfer-python` at build time; `setup.sh` auto-detects compute_cap via nvidia-smi and writes `TORCH_CUDA_ARCH_LIST` + `VLLM_USE_FLASHINFER_SAMPLER=0` for Blackwell; both systemd templates `--env` propagate them into the container | ✅ Verified on RTX 5070 Ti (auto-detected `12.0`); applies identically to B300 sm_100 |
 | Manual env required per host | Fully automated from `nvidia-smi compute_cap` | ✅ Unit + live |
+| `apt-get install ./*.deb` instead of standard `apt install <pkg>` | bundle/apt/ ships with `Packages.gz`; setup.sh + deploy.sh register a `file://` source, call `apt-get install -y apptainer ...` by name, then tear the source down. Operators get normal `apt list --installed` / `apt remove` behavior | ✅ Unit-verified |
 
 ---
 

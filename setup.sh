@@ -219,19 +219,60 @@ stage_2_manifest_verify() {
     fi
 }
 
-# Stage 3 — apt_offline (install .deb files from bundle/apt)
+# Stage 3 — apt_offline
+#
+# Registers $BUNDLE_ROOT/apt as a local apt repository and installs
+# top-level packages with a standard `apt-get install -y apptainer ...`
+# call (NOT `dpkg -i`, NOT `apt-get install ./*.deb`). The operator can
+# then manage everything with familiar apt commands:
+#   apt list --installed | grep apptainer
+#   apt-mark hold apptainer
+#   apt remove apptainer
+# After install the temporary sources entry is removed so apt does not
+# keep pointing at the bundle path.
 stage_3_apt_offline() {
-    if [[ -d "$BUNDLE_ROOT/apt" ]]; then
-        local debs=("$BUNDLE_ROOT/apt"/*.deb)
-        if (( ${#debs[@]} > 0 )) && [[ -e "${debs[0]}" ]]; then
-            run "apt-get install -y --no-install-recommends ${debs[*]} </dev/null"
-            note "installed ${#debs[@]} .deb packages"
-        else
-            note "bundle/apt empty"
-        fi
-    else
-        note "bundle/apt missing — assuming pre-installed"
+    if [[ ! -d "$BUNDLE_ROOT/apt" ]]; then
+        note "bundle/apt missing — assuming required packages pre-installed"
+        return 0
     fi
+    local debs=("$BUNDLE_ROOT/apt"/*.deb)
+    if (( ${#debs[@]} == 0 )) || [[ ! -e "${debs[0]}" ]]; then
+        note "bundle/apt empty — assuming required packages pre-installed"
+        return 0
+    fi
+
+    # Build-side may have skipped this; create it now so apt can index.
+    if [[ ! -f "$BUNDLE_ROOT/apt/Packages.gz" ]]; then
+        if command -v dpkg-scanpackages >/dev/null 2>&1; then
+            note "indexing $BUNDLE_ROOT/apt (Packages.gz missing)"
+            run "( cd '$BUNDLE_ROOT/apt' && dpkg-scanpackages -m . /dev/null 2>/dev/null | gzip -9c > Packages.gz )"
+        else
+            fail "no Packages.gz in $BUNDLE_ROOT/apt and dpkg-scanpackages not available; rebuild the bundle on a 24.04 host"
+        fi
+    fi
+
+    local list_file="/etc/apt/sources.list.d/loopcoder-local.list"
+    note "registering local apt repo at $BUNDLE_ROOT/apt"
+    run "echo 'deb [trusted=yes] file://$BUNDLE_ROOT/apt ./' > '$list_file'"
+    # Refresh only our local source; do not contact the network.
+    run "apt-get -o Dir::Etc::sourcelist='$list_file' -o Dir::Etc::sourceparts='-' -o APT::Get::List-Cleanup=0 update </dev/null"
+
+    # Top-level packages the B300 node actually needs (mirror of
+    # bundle/in_vm/collect_apt.sh PACKAGES). apt resolves the dep graph
+    # from the local repo's Packages.gz.
+    local pkgs=(
+        apptainer
+        python3.12 python3.12-venv python3.12-dev python3-pip
+        rsync curl ca-certificates jq tmux git
+    )
+    note "apt install: ${pkgs[*]}"
+    run "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ${pkgs[*]} </dev/null"
+    note "installed via apt: ${pkgs[*]}"
+
+    # Tear down the temporary source so the host's apt is clean again.
+    # (--reinstall regenerates it next run.)
+    run "rm -f '$list_file'"
+    run "apt-get -o APT::Get::List-Cleanup=0 update </dev/null || true"
 }
 
 # Stage 4 — apptainer
@@ -410,9 +451,18 @@ _gpu_arch() {
 
 _write_vllm_env() {
     local model_id="$1" env_file="$2" served="$3" port="$4"
+    # Use the suite SIF directly: /usr/local/bin/loopcoder is created in
+    # stage 12, which runs AFTER stage 9. The suite SIF is already
+    # installed in stage 8.
+    local current="${SIF_CURRENT_DIR:-/opt/apptainers/current}"
     local resolved
-    resolved="$(/usr/local/bin/loopcoder catalog-resolve "$model_id" 2>/dev/null)" \
-        || fail "catalog-resolve failed for '$model_id'"
+    if [[ -x /usr/local/bin/loopcoder ]]; then
+        resolved="$(/usr/local/bin/loopcoder catalog-resolve "$model_id" 2>/dev/null)" \
+            || fail "catalog-resolve failed for '$model_id'"
+    else
+        resolved="$(apptainer exec "$current/loopcoder-suite.sif" loopcoder catalog-resolve "$model_id" 2>/dev/null)" \
+            || fail "catalog-resolve failed for '$model_id' (via suite SIF)"
+    fi
     local M_QUANT M_TP M_MAXLEN M_PARSER
     M_QUANT="$(echo "$resolved"  | awk -F= '/^MODEL_QUANTIZATION=/{print $2}')"
     M_TP="$(echo "$resolved"     | awk -F= '/^MODEL_TP=/{print $2}')"

@@ -57,6 +57,15 @@ The model is **not** in the bundle — it travels separately per mode.
 > `output/sif-bundle/apt/`. Or pass `--skip-apt` if the GPU server
 > already has apptainer (then setup.sh's stage 4 just verifies it).
 
+> **How packages are installed on the target:** `output/sif-bundle/apt/`
+> is shipped as a real **local apt repository** — `Packages.gz` is
+> generated at build time. setup.sh stage 3 registers it as a temporary
+> `file://` source, runs a standard
+> `apt-get install -y apptainer python3.12 …`, then removes the
+> temp source. The operator sees `apptainer` etc. as normal apt
+> packages — `apt list --installed`, `apt-mark hold`, `apt remove` all
+> behave normally. No `dpkg -i`, no `apt install ./*.deb`.
+
 > **Blackwell GPUs (B200/B300 sm_100, RTX 50 sm_120):** no manual env
 > needed. setup.sh reads `nvidia-smi --query-gpu=compute_cap`, writes
 > `TORCH_CUDA_ARCH_LIST` + `VLLM_USE_FLASHINFER_SAMPLER=0` into each

@@ -80,5 +80,8 @@ def test_dry_run_mentions_apt_install(tmp_path: Path):
     out = res.stdout + res.stderr
     # Dry-run should announce the apt install command without contacting the host
     assert "apt-get install" in out
-    assert "dpkg" not in out  # we don't recommend dpkg
+    # We never install with `dpkg -i` (no dep resolution). `dpkg-dev` /
+    # `dpkg-scanpackages` are fine — they index the local apt repo so
+    # the actual install goes through `apt-get install <pkg>` by name.
+    assert "dpkg -i" not in out
     assert "rsync" in out

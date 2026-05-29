@@ -167,14 +167,29 @@ if [[ $SETUP_ONLY -eq 0 ]]; then
     fi
 fi
 
-# ---------- apt install ----------
+# ---------- apt install (via a local file:// apt repo on the remote) ----------
 if [[ $SETUP_ONLY -eq 0 ]]; then
-    log "Remote apt install (./apt/*.deb)"
-    # NB: we use `apt-get install -y --no-install-recommends ./*.deb` so apt
-    # solves the dep graph across the staged .debs. dpkg -i would fail because
-    # it does not handle missing transitive deps.
-    ssh_run "cd $REMOTE_BUNDLE/apt && \
-             ${SUDO_REMOTE} apt-get install -y --no-install-recommends ./*.deb </dev/null"
+    log "Remote apt install via local repo at $REMOTE_BUNDLE/apt"
+    # Register the bundle's apt/ dir as a temporary file:// source, then
+    # call standard `apt-get install -y apptainer …`. NOT `dpkg -i`, NOT
+    # `apt install ./*.deb` — so the operator gets familiar apt list /
+    # apt-mark hold / apt remove behavior afterwards. Packages.gz must
+    # exist in apt/ (build-sif-bundle.sh creates it); if missing, we
+    # regenerate it on the fly via dpkg-scanpackages.
+    ssh_run "if [[ ! -f $REMOTE_BUNDLE/apt/Packages.gz ]]; then \
+               ${SUDO_REMOTE} apt-get install -y dpkg-dev </dev/null; \
+               ( cd $REMOTE_BUNDLE/apt && \
+                 ${SUDO_REMOTE} bash -c 'dpkg-scanpackages -m . /dev/null 2>/dev/null | gzip -9c > Packages.gz' ); \
+             fi"
+    ssh_run "echo 'deb [trusted=yes] file://$REMOTE_BUNDLE/apt ./' \
+               | ${SUDO_REMOTE} tee /etc/apt/sources.list.d/loopcoder-local.list >/dev/null"
+    ssh_run "${SUDO_REMOTE} apt-get \
+               -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/loopcoder-local.list \
+               -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0 update </dev/null"
+    ssh_run "${SUDO_REMOTE} DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+               apptainer python3.12 python3.12-venv python3.12-dev python3-pip \
+               rsync curl ca-certificates jq tmux git </dev/null"
+    ssh_run "${SUDO_REMOTE} rm -f /etc/apt/sources.list.d/loopcoder-local.list"
     ssh_run "apptainer --version 2>&1 | head -1"
 fi
 
