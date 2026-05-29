@@ -2,10 +2,10 @@
 # Build a SIF-only offline bundle on THIS host (no VM, no WSL2).
 #
 # Why this exists:
-#   The build server and the GPU server (B300) are BOTH offline and run
-#   the same Ubuntu 24.04. The B300 already has apptainer installed. So
-#   we don't ship apt .deb or Python wheels separately — everything the
-#   target needs lives inside three self-contained SIFs:
+#   The B300 is offline Ubuntu 24.04 with only the NVIDIA driver
+#   pre-installed (no apptainer, no python toolchain). So besides the
+#   self-contained SIFs we also ship the apt .deb closure for apptainer
+#   so setup.sh can install it offline on the target:
 #
 #       vllm.sif               vLLM serving engine
 #       loopcoder-suite.sif    agent + HTTP API + MCP server
@@ -28,14 +28,20 @@
 # Output layout (ready to back up to Windows as-is):
 #   <output>/
 #     containers/{vllm,loopcoder-suite,loopcoder-sandbox}.sif
+#     apt/                      .deb closure for apptainer (24.04 host only)
 #     source/LoopCoder/         exact source tree (setup.sh + helpers)
 #     win-tools/                cwRsync (so Windows can rsync without WSL2)
 #     manifest.sha256
 #
 # Usage:
 #   bash scripts/build-sif-bundle.sh [--output DIR] [--skip-vllm]
-#                                    [--skip-wheels] [--no-win-tools]
-#                                    [--dry-run]
+#                                    [--skip-wheels] [--skip-apt]
+#                                    [--no-win-tools] [--dry-run]
+#
+# The apt step needs an Ubuntu 24.04 host (B300 target ABI). If you
+# build on 22.04, the apt step is auto-skipped with a clear warning —
+# get the .deb bundle from a 24.04 host (container or VM) once and
+# place it under <output>/apt/ manually.
 
 set -euo pipefail
 
@@ -45,6 +51,7 @@ REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." &>/dev/null && pwd)"
 OUTPUT_ROOT="${OUTPUT_ROOT:-$REPO_ROOT/output/sif-bundle}"
 SKIP_VLLM=0
 SKIP_WHEELS=0
+SKIP_APT=0
 NO_WIN_TOOLS=0
 DRY_RUN=0
 
@@ -53,6 +60,7 @@ while [[ $# -gt 0 ]]; do
         --output)       OUTPUT_ROOT="$2"; shift 2 ;;
         --skip-vllm)    SKIP_VLLM=1; shift ;;
         --skip-wheels)  SKIP_WHEELS=1; shift ;;
+        --skip-apt)     SKIP_APT=1; shift ;;
         --no-win-tools) NO_WIN_TOOLS=1; shift ;;
         --dry-run)      DRY_RUN=1; shift ;;
         -h|--help)
@@ -78,7 +86,8 @@ CONTAINERS="$OUTPUT_ROOT/containers"
 SOURCE_OUT="$OUTPUT_ROOT/source/LoopCoder"
 WHEELS_OUT="$OUTPUT_ROOT/wheels"
 WIN_TOOLS="$OUTPUT_ROOT/win-tools"
-run "mkdir -p '$CONTAINERS' '$SOURCE_OUT' '$WHEELS_OUT'"
+APT_OUT="$OUTPUT_ROOT/apt"
+run "mkdir -p '$CONTAINERS' '$SOURCE_OUT' '$WHEELS_OUT' '$APT_OUT'"
 
 # ---------- 1. wheelhouse (so suite SIF is fully self-contained) ----------
 if [[ $SKIP_WHEELS -eq 0 ]]; then
@@ -113,6 +122,35 @@ run "rsync -a --delete \
     --exclude '*.sif' \
     '$REPO_ROOT/' '$SOURCE_OUT/'"
 
+# ---------- 3b. apt .deb closure (apptainer + deps) for the offline target ----------
+# B300 has only the NVIDIA driver, no apptainer. We ship the .deb
+# closure so setup.sh can `apt-get install -y ./*.deb` offline. The
+# .deb ABI is Ubuntu-version-specific; the target is 24.04, so we MUST
+# collect from a 24.04 host. If you're not on 24.04, skip and obtain
+# the bundle once from a 24.04 host (container or VM is fine).
+if [[ $SKIP_APT -eq 0 ]]; then
+    HOST_VER=""
+    [[ -r /etc/os-release ]] && HOST_VER="$(. /etc/os-release; echo "${VERSION_ID:0:5}")"
+    if [[ "$HOST_VER" == "24.04" ]]; then
+        log "Collecting apt .deb closure (apptainer + deps) into $APT_OUT"
+        if ! command -v apt-rdepends >/dev/null 2>&1; then
+            log "  apt-rdepends not found; installing (one-time)"
+            run "sudo apt-get install -y apt-rdepends"
+        fi
+        run "bash '$REPO_ROOT/bundle/in_vm/collect_apt.sh' '$APT_OUT'"
+    else
+        log "WARN: this host is not Ubuntu 24.04 (got ${HOST_VER:-unknown})"
+        log "  apt step skipped — apt/ will be empty. Get the .deb bundle"
+        log "  ONCE from a 24.04 host (e.g.:"
+        log "    docker run --rm -v \$PWD/$APT_OUT:/out ubuntu:24.04 bash -c \\"
+        log "      'apt-get update && apt-get install -y apt-rdepends && \\"
+        log "       bash /path/to/bundle/in_vm/collect_apt.sh /out')"
+        log "  and place the .deb files under $APT_OUT/ before deploying."
+    fi
+else
+    log "--skip-apt: assuming B300 already has apptainer (no apt/ in bundle)"
+fi
+
 # ---------- 4. cwRsync for Windows (no rsync on Windows, no WSL2) ----------
 if [[ $NO_WIN_TOOLS -eq 0 ]]; then
     log "Staging cwRsync for the Windows transfer step"
@@ -125,7 +163,7 @@ fi
 log "Writing manifest.sha256"
 if [[ $DRY_RUN -eq 0 ]]; then
     ( cd "$OUTPUT_ROOT" \
-        && find containers source win-tools -type f -print0 2>/dev/null \
+        && find containers source win-tools apt -type f -print0 2>/dev/null \
         | xargs -0 sha256sum > manifest.sha256 )
     ( cd "$OUTPUT_ROOT" && sha256sum -c manifest.sha256 --quiet ) \
         || fail "manifest self-check failed"

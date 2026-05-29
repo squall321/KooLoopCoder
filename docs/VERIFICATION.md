@@ -6,9 +6,21 @@ checked, but the full real-hardware flow was not. "Scripted only" =
 code written + syntax/unit checks pass, but never run on the real
 target.
 
-Last updated: 2026-05-17. Hardware available for verification: one
+Last updated: 2026-05-27. Hardware available for verification: one
 **RTX 5070 Ti (16 GB, Blackwell sm_120)** dev box. No B300, no Windows
 host, no Slurm cluster available here.
+
+## 2026-05-27 — B300 readiness gap fixes
+
+These were missing/broken when "ready for B300 (24.04, driver
+580.159.04 + CUDA 13, offline)" was reviewed and are now fixed:
+
+| Gap | Fix | Status |
+|---|---|---|
+| SIF-only bundle had no apt closure for apptainer (B300 has driver only) | `build-sif-bundle.sh` collects `apt/` on 24.04 hosts; on other hosts auto-skips with an explicit docker one-liner to get the .deb closure | ✅ Logic-verified (dry-run on 22.04 prints the guide; collect_apt.sh itself is the same one used by the legacy VM path) |
+| setup.sh stage 4 just failed if apptainer absent | Now points operators at the exact bundle/build path to fix it | ✅ Unit test |
+| Blackwell sm_100/120 vLLM crash (FlashInfer arch bug) | `vllm.def` strips `flashinfer-python` at build time; `setup.sh` auto-detects compute_cap via nvidia-smi and writes `TORCH_CUDA_ARCH_LIST` + `VLLM_USE_FLASHINFER_SAMPLER=0` for Blackwell; both systemd templates `--env` propagate them into the container | ✅ Verified on RTX 5070 Ti (auto-detected `12.0`); applies identically to B300 sm_100 |
+| Manual env required per host | Fully automated from `nvidia-smi compute_cap` | ✅ Unit + live |
 
 ---
 

@@ -36,19 +36,33 @@ root needed beyond what `apptainer build` asks):
 git clone https://github.com/squall321/KooLoopCoder
 cd KooLoopCoder
 bash scripts/build-sif-bundle.sh            # → output/sif-bundle/
-# options: --output DIR  --skip-vllm  --skip-wheels  --no-win-tools  --dry-run
+# options: --output DIR  --skip-vllm  --skip-wheels  --skip-apt  --no-win-tools  --dry-run
 ```
 
 Produces `output/sif-bundle/`:
 
 ```
 containers/vllm.sif  loopcoder-suite.sif  loopcoder-sandbox.sif
+apt/                    apptainer + deps as .deb (Ubuntu 24.04 ABI)
 source/LoopCoder/       setup.sh + all helpers
 win-tools/              cwRsync (only used by Mode B)
 manifest.sha256
 ```
 
 The model is **not** in the bundle — it travels separately per mode.
+
+> **apt step on a non-24.04 build host:** the script auto-skips with a
+> clear warning and prints the exact docker one-liner to get the .deb
+> closure once from an Ubuntu 24.04 container, then drop the files into
+> `output/sif-bundle/apt/`. Or pass `--skip-apt` if the GPU server
+> already has apptainer (then setup.sh's stage 4 just verifies it).
+
+> **Blackwell GPUs (B200/B300 sm_100, RTX 50 sm_120):** no manual env
+> needed. setup.sh reads `nvidia-smi --query-gpu=compute_cap`, writes
+> `TORCH_CUDA_ARCH_LIST` + `VLLM_USE_FLASHINFER_SAMPLER=0` into each
+> `vllm-<key>.env`, and the systemd unit forwards them into the
+> apptainer container. The vLLM SIF also strips `flashinfer-python` at
+> build time so the FlashInfer arch-detection bug stays gone.
 
 ---
 
@@ -57,7 +71,9 @@ The model is **not** in the bundle — it travels separately per mode.
 Build host (or any host with the bundle) SSHes to the GPU server.
 
 **Prerequisites on the GPU server:** SSH key access, `sudo`, Ubuntu
-24.04, `apptainer` installed (or let the legacy apt bundle install it).
+24.04, NVIDIA driver + CUDA installed. **`apptainer` does NOT need to
+be pre-installed** — setup.sh stage 3 installs it offline from
+`bundle/apt/*.deb` (collected in Step 0 on a 24.04 host).
 
 ```bash
 # 1. (done) Step 0 produced output/sif-bundle/
@@ -119,7 +135,9 @@ ferries everything to the B300 over SSH.
 `setup.sh` packs each into `model-<key>.sif`.
 
 Prereqs: Windows 10/11, Python 3.10+, OpenSSH client, passwordless SSH
-key to the B300, the B300 already has `apptainer`.
+key to the B300. The B300 needs only the NVIDIA driver + CUDA —
+**`apptainer` is installed automatically** from `bundle/apt/*.deb`
+during the remote setup.
 
 Full reference: [`windows-mediated-deploy.md`](windows-mediated-deploy.md).
 

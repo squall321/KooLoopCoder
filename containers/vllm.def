@@ -22,6 +22,12 @@ From: vllm/vllm-openai:latest
             ln -sf "$(command -v python3)" /usr/local/bin/python
         fi
     fi
+    # Blackwell (sm_100 B200/B300, sm_120 RTX 50): FlashInfer JIT
+    # mis-detects compute capability when TORCH_CUDA_ARCH_LIST is unset
+    # and crashes vLLM at sampler/attention init with the misleading
+    # "FlashInfer requires GPUs with sm75 or higher". Remove it so vLLM
+    # falls back to PyTorch-native paths. Harmless on other GPUs.
+    pip uninstall -y flashinfer-python flashinfer-cubin 2>/dev/null || true
     # Smoke-check vLLM imports inside the image
     python3 -c "import vllm; print('vllm', vllm.__version__)"
 
