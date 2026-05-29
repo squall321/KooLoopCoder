@@ -151,7 +151,11 @@ _suite_sif() {
 models_list() {
     local sif; sif="$(_suite_sif)"
     [[ -f "$sif" ]] || return 0
-    apptainer exec "$sif" python3 - "$INSTALL_YAML" <<'PY' 2>/dev/null || true
+    [[ -f "$INSTALL_YAML" ]] || return 0
+    # Empty stdout = no models[] in install.yaml (single-model mode).
+    # We let parse errors surface to stderr so an operator sees them
+    # instead of silently falling back.
+    apptainer exec "$sif" python3 - "$INSTALL_YAML" <<'PY'
 import sys, yaml
 cfg = yaml.safe_load(open(sys.argv[1])) or {}
 for m in (cfg.get("models") or []):
@@ -164,7 +168,8 @@ PY
 default_model_key() {
     local sif; sif="$(_suite_sif)"
     [[ -f "$sif" ]] || return 0
-    apptainer exec "$sif" python3 - "$INSTALL_YAML" <<'PY' 2>/dev/null || true
+    [[ -f "$INSTALL_YAML" ]] || return 0
+    apptainer exec "$sif" python3 - "$INSTALL_YAML" <<'PY'
 import sys, yaml
 cfg = yaml.safe_load(open(sys.argv[1])) or {}
 print(cfg.get("default_model") or "")
@@ -190,6 +195,26 @@ stage_0_preflight() {
     df_mb=$(df -BM --output=avail "$INSTALL_ROOT" | tail -1 | tr -dc 0-9)
     [[ "${df_mb:-0}" -ge 30000 ]] || fail "need ≥30GB free at $INSTALL_ROOT (have ${df_mb}M)"
     note "free space: ${df_mb}M at $INSTALL_ROOT"
+
+    # Config staging: every later stage reads $INSTALL_YAML / $VLLM_YAML /
+    # $LOOPCODER_YAML. Seed them from the bundle's *.yaml.example on
+    # first install so a fresh B300 setup just works; the operator
+    # tweaks them in /etc/loopcoder/ afterwards if needed.
+    local src_cfg="$BUNDLE_ROOT/source/LoopCoder/config"
+    [[ -d "$src_cfg" ]] || src_cfg="$(dirname "$0")/config"
+    [[ -d "$src_cfg" ]] || fail "config templates not found (bundle/source/LoopCoder/config missing)"
+    local seeded=0
+    for f in install vllm loopcoder; do
+        local dst="$ETC_DIR/${f}.yaml" tmpl="$src_cfg/${f}.yaml.example"
+        if [[ ! -f "$dst" ]]; then
+            [[ -f "$tmpl" ]] || fail "missing config template: $tmpl"
+            run "cp '$tmpl' '$dst'"
+            note "seeded $dst (from ${f}.yaml.example)"
+            seeded=1
+        fi
+    done
+    [[ $seeded -eq 0 ]] || note "review $ETC_DIR/*.yaml before going to production"
+    [[ -f "$INSTALL_YAML" ]] || fail "still missing $INSTALL_YAML after seeding"
 }
 
 # Stage 1 — hw_check (skipped in test mode)

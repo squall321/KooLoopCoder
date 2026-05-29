@@ -229,7 +229,12 @@ if [[ $APT_ONLY -eq 0 ]]; then
     setup_args=()
     [[ $SKIP_GPU -eq 1 ]] && setup_args+=("--skip-gpu-stages")
     [[ $SKIP_MODEL_STAGE -eq 1 ]] && setup_args+=("--skip-model-stage")
-    [[ "${MODEL_MODE:-none}" != "none" ]] && setup_args+=("--skip-model-stage")  # we just did it above
+    # When we just rsync'd / HF-downloaded the model above, point
+    # setup.sh at it so stage 7 packs it into model.sif. (We do NOT
+    # skip stage 7 — that would leave systemd with no model.sif.)
+    if [[ "${MODEL_MODE:-none}" != "none" && -n "$MODEL_REMOTE" ]]; then
+        setup_args+=("--model-src" "$MODEL_REMOTE")
+    fi
     ssh_run "${SUDO_REMOTE} bash $REMOTE_BUNDLE/source/LoopCoder/setup.sh --bundle $REMOTE_BUNDLE ${setup_args[*]}"
 fi
 
