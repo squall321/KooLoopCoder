@@ -48,9 +48,23 @@ verification steps are in:
 - Disk for the model under `/scratch/models` (systemd modes) or
   `$LOOPCODER_HOME/models` (HPC).
 
-## Config (all modes)
+## Config (all modes) — author these BEFORE setup.sh
 
-Three YAMLs, copied from `config/*.example`:
+Three YAMLs go to `/etc/loopcoder/`. **setup.sh refuses to run until
+they exist** — we don't auto-seed defaults because that would silently
+set the box up for the example's model rather than yours. On the GPU
+server, after the bundle is staged at `$BUNDLE_ROOT` (typically
+`/models`):
+
+```bash
+sudo mkdir -p /etc/loopcoder
+sudo cp $BUNDLE_ROOT/source/LoopCoder/config/install.yaml.example  /etc/loopcoder/install.yaml
+sudo cp $BUNDLE_ROOT/source/LoopCoder/config/vllm.yaml.example     /etc/loopcoder/vllm.yaml
+sudo cp $BUNDLE_ROOT/source/LoopCoder/config/loopcoder.yaml.example /etc/loopcoder/loopcoder.yaml
+sudo $EDITOR /etc/loopcoder/install.yaml      # set model.id / models[] for YOUR GPU
+```
+
+What each file is for:
 
 - `install.yaml` — the **only thing you normally edit**: `model.id`
   (single) or `models[]` + `default_model` (multi). Quantization,
@@ -59,7 +73,9 @@ Three YAMLs, copied from `config/*.example`:
 - `vllm.yaml` — model-independent throughput/memory knobs only.
 - `loopcoder.yaml` — agent loop, sandbox, `llm.base_url`.
 
-Validate after edits: `loopcoder config validate`.
+Validate after edits: `loopcoder config validate`. If you forget any of
+the three, both setup.sh and deploy.sh print the exact `cp` commands
+above before failing.
 
 ## Day-to-day commands
 

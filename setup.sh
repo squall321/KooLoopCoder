@@ -196,25 +196,34 @@ stage_0_preflight() {
     [[ "${df_mb:-0}" -ge 30000 ]] || fail "need ≥30GB free at $INSTALL_ROOT (have ${df_mb}M)"
     note "free space: ${df_mb}M at $INSTALL_ROOT"
 
-    # Config staging: every later stage reads $INSTALL_YAML / $VLLM_YAML /
-    # $LOOPCODER_YAML. Seed them from the bundle's *.yaml.example on
-    # first install so a fresh B300 setup just works; the operator
-    # tweaks them in /etc/loopcoder/ afterwards if needed.
+    # Config required: every later stage reads $INSTALL_YAML / $VLLM_YAML /
+    # $LOOPCODER_YAML. We intentionally do NOT seed defaults — the
+    # operator must put their own intent in install.yaml (which model
+    # to serve, paths, etc.) before installing. Otherwise we'd happily
+    # set the box up for the wrong model.
     local src_cfg="$BUNDLE_ROOT/source/LoopCoder/config"
     [[ -d "$src_cfg" ]] || src_cfg="$(dirname "$0")/config"
-    [[ -d "$src_cfg" ]] || fail "config templates not found (bundle/source/LoopCoder/config missing)"
-    local seeded=0
+    local missing=()
     for f in install vllm loopcoder; do
-        local dst="$ETC_DIR/${f}.yaml" tmpl="$src_cfg/${f}.yaml.example"
-        if [[ ! -f "$dst" ]]; then
-            [[ -f "$tmpl" ]] || fail "missing config template: $tmpl"
-            run "cp '$tmpl' '$dst'"
-            note "seeded $dst (from ${f}.yaml.example)"
-            seeded=1
-        fi
+        [[ -f "$ETC_DIR/${f}.yaml" ]] || missing+=("$f")
     done
-    [[ $seeded -eq 0 ]] || note "review $ETC_DIR/*.yaml before going to production"
-    [[ -f "$INSTALL_YAML" ]] || fail "still missing $INSTALL_YAML after seeding"
+    if (( ${#missing[@]} > 0 )); then
+        cat >&2 <<EOF
+FAIL: missing config under $ETC_DIR:
+$(for f in "${missing[@]}"; do echo "  - $f.yaml"; done)
+
+These describe YOUR deployment (which model to serve, paths,
+ports) and MUST be authored before setup.sh runs. Templates ship
+in the bundle:
+
+  sudo mkdir -p $ETC_DIR
+$(for f in "${missing[@]}"; do echo "  sudo cp '$src_cfg/${f}.yaml.example' '$ETC_DIR/${f}.yaml'"; done)
+  sudo \$EDITOR $ETC_DIR/install.yaml     # set model.id (or models[]) for your GPU
+
+Then rerun: sudo bash setup.sh
+EOF
+        exit 1
+    fi
 }
 
 # Stage 1 — hw_check (skipped in test mode)

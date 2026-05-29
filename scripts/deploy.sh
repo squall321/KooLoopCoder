@@ -223,6 +223,38 @@ if [[ $APT_ONLY -eq 0 && $SKIP_MODEL_STAGE -eq 0 && "${MODEL_MODE:-none}" != "no
     esac
 fi
 
+# ---------- check operator-authored config exists on the remote ----------
+# setup.sh's stage 0 fails (correctly) if /etc/loopcoder/*.yaml are
+# missing — we don't seed defaults because the operator must decide
+# which model to serve. Catch that here so deploy.sh prints the same
+# guidance without going through the per-stage failure path.
+if [[ $APT_ONLY -eq 0 && $DRY -eq 0 ]]; then
+    missing="$(ssh $USER_HOST "${SUDO_REMOTE} bash -c '
+        m=()
+        for f in install vllm loopcoder; do
+            [[ -f /etc/loopcoder/\$f.yaml ]] || m+=(\$f)
+        done
+        IFS=,; echo \"\${m[*]:-}\"
+    '" 2>/dev/null || true)"
+    if [[ -n "$missing" ]]; then
+        cat >&2 <<EOF
+FAIL: missing /etc/loopcoder/*.yaml on $USER_HOST: $missing
+
+These describe YOUR deployment (which model to serve, paths, ports)
+and must be authored before setup.sh runs. The templates were just
+rsynced; on the remote, run:
+
+  ssh $USER_HOST '${SUDO_REMOTE} mkdir -p /etc/loopcoder'
+  for f in $(echo "$missing" | tr , ' '); do
+    echo "  ssh $USER_HOST '${SUDO_REMOTE} cp $REMOTE_BUNDLE/source/LoopCoder/config/\$f.yaml.example /etc/loopcoder/\$f.yaml'"
+  done
+  ssh $USER_HOST '${SUDO_REMOTE} \$EDITOR /etc/loopcoder/install.yaml'   # set model.id (or models[]) for your GPU
+  bash scripts/deploy.sh $USER_HOST --setup-only ...                     # rerun this script with --setup-only
+EOF
+        exit 1
+    fi
+fi
+
 # ---------- run setup.sh ----------
 if [[ $APT_ONLY -eq 0 ]]; then
     log "Remote: bash setup.sh"
